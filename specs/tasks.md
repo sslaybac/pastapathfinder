@@ -38,7 +38,7 @@
     - Unit test `tests/unit/test_import_discipline.py` (the standing AC-23.1 / AC-25.1 guard): greps every source file under `src/pastapathfinder/` and fails if any module outside `src/pastapathfinder/adapters/python/` imports `mypy.*`, or if anything under `src/pastapathfinder/viewer/` imports `mypy.*` or `pastapathfinder.adapters.*`. It passes vacuously today and must never be weakened.
     - `ruff check` and `ruff format --check` pass; `pytest` runs green.
 
-- [ ] **Task 1.2 — `schema.py` + `index.py`: node-ID grammar, DDL, validation, versioning, canonical writes**
+- [x] **Task 1.2 — `schema.py` + `index.py`: node-ID grammar, DDL, validation, versioning, canonical writes**
   - **Deliverable:** The single source of the data model — the §4.2 DDL, `SCHEMA_VERSION = 1`, the §4.1 node-ID grammar with its validating regex, the row dataclasses (`GraphFragment`, `FileRecord`, `NodeRow`, `EdgeRow`, `SkipRecord`, `Diag`), `DEADCODE_CAVEAT`, `validate_fragment()`, and an index store that creates/opens the SQLite file, enforces the schema version, writes through a canonical-sort layer, and supports atomic full writes (`index.sqlite.tmp` + rename) and transactional merges.
   - **References:** design.md §3.8, §4.1, §4.2, §4.3, D3, D4, D12; requirements FR-20, FR-21, FR-22, FR-23 (AC-23.2), FR-37 (storage), FR-39, FR-40 (storage), FR-44 (write discipline), EC-13.
   - **Dependencies:** 1.1.
