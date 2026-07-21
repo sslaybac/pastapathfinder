@@ -1,1 +1,22 @@
 prompt.md
+
+# Python build and cache artifacts. Names follow design.md §3.3's normative Python
+# convention set, so this repository looks to the tool the way the tool expects
+# Python repositories to look.
+__pycache__/
+build/
+dist/
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+virtualenv/

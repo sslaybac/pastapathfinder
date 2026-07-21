@@ -28,7 +28,7 @@
 
 ### Milestone 1 — Walking skeleton
 
-- [ ] **Task 1.1 — Project scaffolding, tooling, and the standing import-discipline test**
+- [x] **Task 1.1 — Project scaffolding, tooling, and the standing import-discipline test**
   - **Deliverable:** An installable package (`pip install -e .`) exposing the `pastapathfinder` console script with `analyze` / `query` / `view` subcommands parsed per design.md §5.1, top-level exception trapping, `--debug`, and the exit-code mapping; `ruff` and `pytest` configured; the repository tree of design.md §6 created (empty modules where later tasks fill them).
   - **References:** design.md §3.1, §5.1, §6, D2, D10; requirements FR-32, FR-43, FR-23 (AC-23.1), FR-25 (AC-25.1).
   - **Dependencies:** none.

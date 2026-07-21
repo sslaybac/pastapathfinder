@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pastapathfinder"
+description = "Static-analysis tool for legacy and AI-generated Python codebases: sliced call traces through spaghetti code."
+requires-python = ">=3.12"
+dynamic = ["version"]
+
+# design.md §6 and D1/D1a: exactly these three runtime dependencies. The mypy pin
+# is exact and is never bumped casually — upgrades follow the D1a revalidation
+# procedure (design.md §2).
+dependencies = [
+    "mypy==2.3.0",
+    "pathspec",
+    "flask",
+]
+
+[project.optional-dependencies]
+# Development toolchain, not runtime dependencies (design.md §6 conventions).
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+pastapathfinder = "pastapathfinder.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "pastapathfinder.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "F", # pyflakes
+    "I", # import sorting
+    "UP", # pyupgrade
+    "B", # bugbear
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
