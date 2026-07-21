@@ -62,7 +62,7 @@
     - AC-4.1/4.2: `reinclude` restores a default-excluded path to candidacy; a user `exclude` pattern excludes and is attributed `user:exclude`.
     - AC-4.3 (failure): an invalid pattern (rejected by `pathspec`) and malformed TOML each terminate the run with an error naming the pattern/file — never a silent ignore.
 
-- [ ] **Task 1.4 — `discovery.py`: enumeration, probing, symlink and pruning rules**
+- [x] **Task 1.4 — `discovery.py`: enumeration, probing, symlink and pruning rules**
   - **Deliverable:** `discover(root, ruleset) -> DiscoveryResult` implementing design.md §3.3's normative walk: directory-rule pruning (an excluded directory is one exclusion entry; its contents are not enumerated), `.py` candidates, the shebang probe for extensionless files (≤ 256 bytes of line 1, must start `#!` and contain `python`), symlink handling, and root-error termination.
   - **References:** design.md §3.3 (`discovery`), §8-O1; requirements FR-1 (AC-1.1–1.6), FR-2, EC-10, EC-11.
   - **Dependencies:** 1.3.
