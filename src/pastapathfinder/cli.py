@@ -33,10 +33,9 @@ DEFAULT_VIEWER_PORT = 8517
 def _add_debug(parser: argparse.ArgumentParser) -> None:
     """Attach `--debug` to a subcommand parser.
 
-    design.md §3.1 makes the traceback-behind-`--debug` behavior a property of the
-    top-level trap, which serves every subcommand; §5.1's table lists the flag only
-    under `analyze`. Stakeholder-approved 2026-07-21: the flag is accepted on all
-    three subcommands, and §5.1 owes a dated amendment recording that.
+    design.md D21 (amended 2026-07-21): the traceback-behind-`--debug` behavior is a
+    property of §3.1's top-level trap, which serves every subcommand, so the flag is
+    accepted on all three and on each `query` sub-subcommand.
     """
     parser.add_argument(
         "--debug",

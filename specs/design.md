@@ -65,6 +65,8 @@ Each entry: decision → chosen option → rationale → evidence → requiremen
 
 **D20 — The viewer is index-backed without exception; `/api/dead-code` recomputes (normative).** *Added 2026-07-21; stakeholder-approved in session, resolving the step-4 task-breakdown clarification C-5.* §5.2's "the dead-code report JSON verbatim" is amended to: the endpoint calls `queries.dead_code()` and returns the same shape as `deadcode.json` minus the volatile `run*` block (provenance is already at `/api/meta`). Everything in that report except `run*` is recomputable — `caveat` is the `DEADCODE_CAVEAT` constant, `no_entry_points_warning` comes from reachability. Rationale: the server then opens exactly one file, which makes AC-25.1 a testable invariant rather than a claim; the viewer needs only FR-39's index-version refusal, not a second AC-42.4 report-format refusal path and its own missing-report error state; and `query dead-code --json` and this endpoint are literally the same function, so the §5.1 promise that the two surfaces emit identical shapes cannot drift. Serves FR-19, FR-25, FR-42.
 
+**D21 — `--debug` is accepted on every subcommand (normative).** *Added 2026-07-21; stakeholder-approved in session, resolving an ambiguity surfaced while implementing task 1.1.* §3.1 makes the traceback-behind-`--debug` behavior a property of the top-level exception trap, and that trap serves `analyze`, `query`, and `view` alike; §5.1's original synopsis listed the flag only under `analyze`, which left a `query` or `view` failure with no way to obtain a traceback short of editing the source. The flag is therefore attached to all three subcommands and to each `query` sub-subcommand, and §5.1's synopsis is amended to match. It remains a diagnostic switch only — it changes no exit code, no report, no stdout shape, and no index content, so it stays outside §5.4's volatile-field register by construction. Rejected: keeping the literal §5.1 surface (makes the two documents disagree and leaves the query path undiagnosable); a single global `--debug` before the subcommand (argparse's placement rules would force `pastapathfinder --debug query …`, which reads unlike every other flag in §5.1). Serves FR-43, FR-32.
+
 **Closed triggers and deferred alternatives (for the record).** FR-30's revision trigger fired mid-evaluation for the per-site engines and closed without amendment via engine selection (trace on FR-30, 2026-07-18). The narrowed method-dispatch over-approximation layer was evaluated (FINDINGS-namematch; FINDINGS-session5 Part 3) and deferred to the backlog under the C-6 discipline (C-11); nothing in this design builds toward it, and nothing blocks it — it would arrive as new adapter output plus an FR-39 schema-version bump at most.
 
 ## 3. Component design
@@ -72,7 +74,7 @@ Each entry: decision → chosen option → rationale → evidence → requiremen
 Components are listed in pipeline order. "Interface" means the Python surface other components may import; anything else is private. Every component names the requirements it satisfies; §7 gives the inverse map.
 
 ### 3.1 `cli` — entry point, exit codes, progress plumbing
-**Responsibility:** argument parsing for `analyze` / `query` / `view`; wiring subcommands to `runner`, `queries`, `viewer.server`; catching every exception at the top and converting to exit 2 with a one-line error (stack trace behind `--debug`); computing the final exit code from the run result (0 if the run completed with `skipped == 0`; 1 if completed with skips; 2 otherwise).
+**Responsibility:** argument parsing for `analyze` / `query` / `view`; wiring subcommands to `runner`, `queries`, `viewer.server`; catching every exception at the top and converting to exit 2 with a one-line error (stack trace behind `--debug`, which every subcommand accepts — amended 2026-07-21, D21); computing the final exit code from the run result (0 if the run completed with `skipped == 0`; 1 if completed with skips; 2 otherwise).
 **Interface:** `main(argv) -> int`. Console script `pastapathfinder = pastapathfinder.cli:main`.
 **Satisfies:** FR-43 (AC-43.1–3), FR-32 (console script), part of FR-41 (owns the stderr progress channel handed to `runner`).
 
@@ -218,15 +220,15 @@ Multiple call sites for the same `(src, dst)` collapse into one edge; the sites 
 
 ```
 pastapathfinder analyze <root> [--out DIR] [--config FILE] [--full] [--debug]
-pastapathfinder query entry-points [--out DIR] [--json]
+pastapathfinder query entry-points [--out DIR] [--json] [--debug]
 pastapathfinder query slice --from NODE_ID --direction {forward,backward}
-                    [--max-nodes N] [--out DIR] [--json]
-pastapathfinder query node NODE_ID [--out DIR] [--json]
-pastapathfinder query dead-code [--out DIR] [--json]
-pastapathfinder view [--out DIR] [--port PORT]
+                    [--max-nodes N] [--out DIR] [--json] [--debug]
+pastapathfinder query node NODE_ID [--out DIR] [--json] [--debug]
+pastapathfinder query dead-code [--out DIR] [--json] [--debug]
+pastapathfinder view [--out DIR] [--port PORT] [--debug]
 ```
 
-`--out` default: `$XDG_DATA_HOME/pastapathfinder/<basename>-<sha256(abspath)[:12]>/` (fallback `~/.local/share/…`) — deliberately outside the target tree, so the tool never writes into the codebase (§6 item 17's spirit) and never discovers its own output; also unprivileged by construction (FR-34, AC-34.2's permissions error names the path on failure). `analyze` is incremental automatically when a compatible index exists; `--full` forces the full path. `--json` emits the same structured shapes as the HTTP API on stdout — the agent-facing mechanical surface. Exit codes 0/1/2 per D10, documented in `docs/exit-codes.md`.
+`--out` default: `$XDG_DATA_HOME/pastapathfinder/<basename>-<sha256(abspath)[:12]>/` (fallback `~/.local/share/…`) — deliberately outside the target tree, so the tool never writes into the codebase (§6 item 17's spirit) and never discovers its own output; also unprivileged by construction (FR-34, AC-34.2's permissions error names the path on failure). `analyze` is incremental automatically when a compatible index exists; `--full` forces the full path. `--json` emits the same structured shapes as the HTTP API on stdout — the agent-facing mechanical surface. `--debug` is accepted on **every** subcommand (amended 2026-07-21, D21): it selects the traceback form of §3.1's top-level exception trap, which serves all three. Exit codes 0/1/2 per D10, documented in `docs/exit-codes.md`.
 
 ### 5.2 Viewer HTTP API (localhost only)
 

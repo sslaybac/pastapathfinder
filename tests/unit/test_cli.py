@@ -169,6 +169,6 @@ def test_view_binds_the_default_port():
     ],
 )
 def test_debug_is_accepted_on_every_subcommand(argv):
-    """Stakeholder-approved 2026-07-21: §3.1's trap serves every subcommand."""
+    """design.md D21: §3.1's top-level trap serves every subcommand, so the flag does too."""
     assert _parse(*argv).debug is False
     assert _parse(*argv, "--debug").debug is True
