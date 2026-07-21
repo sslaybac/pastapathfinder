@@ -1,4 +1,112 @@
-"""The language-adapter boundary: the `LanguageAdapter` protocol (design.md §3.4; FR-23).
+"""The language-adapter boundary (design.md §3.4, normative; FR-23).
 
-Placeholder: filled by specs/tasks.md task 1.5.
+This is the FR-23 seam: source files in, schema-conformant graph fragments out. It is the
+only surface through which the pipeline reaches an analysis engine, and it is what makes
+AC-23.1 checkable by grep — nothing outside `adapters/python/` may import `mypy.*`, and
+nothing in this module knows an engine exists.
+
+`GraphFragment`, `SkipRecord` and `Diag` come from `schema.py` unchanged: the adapter
+speaks the index's own row shapes (design.md §4.3), so a fragment needs no translation
+between the engine boundary and the store, and FR-21/FR-22 hold by construction.
+
+**The per-file contract.** Every file handed to `analyze()` yields exactly one fragment,
+whose `FileRecord` records the content hash of the bytes the adapter actually read and a
+status of `analyzed` or `skipped`. A skipped file yields a fragment with that status, its
+skip reason, and no nodes — the `files` row is what FR-24's hash gate and FR-38's change
+check read later — *plus* one `SkipRecord` carrying the human-readable reason for the
+coverage report (AC-7.2). A per-file failure never aborts the run (FR-6).
 """
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+
+from pastapathfinder.progress import ProgressSink
+from pastapathfinder.schema import Diag, GraphFragment, SkipRecord
+
+
+@dataclass(frozen=True, slots=True)
+class SourceFile:
+    """One analysis input, as handed to an adapter.
+
+    `path` is the absolute real path to open — already deduplicated and symlink-resolved
+    by `discovery` — and `relpath` is its root-relative POSIX form, which is the spelling
+    every artifact stores (§4.1's `file:` IDs, the `files` table, the reports). Both are
+    carried so that no adapter has to re-derive one from the other and risk disagreeing
+    with the rest of the run about what a file is called.
+    """
+
+    path: Path
+    relpath: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterResult:
+    """What one adapter produced for one run (design.md §3.4).
+
+    * `fragments` — one per file handed in, per the module docstring's contract.
+    * `skipped` — the human-readable half of every skipped file (FR-6, AC-7.2).
+    * `diagnostics` — non-fatal anomalies for the run's diagnostics report (C-10).
+    * `rechecked` — the re-extraction set on an incremental run: the files whose results
+      this call re-derived. Consumed by `incremental.merge()` (task 4.1), which per D6
+      rule 1 takes it from the engine's own rechecked-modules report and never infers it.
+    * `engine_meta` — provenance for the index's `meta` table (`engine`, `engine_version`).
+    """
+
+    fragments: list[GraphFragment] = field(default_factory=list)
+    skipped: list[SkipRecord] = field(default_factory=list)
+    diagnostics: list[Diag] = field(default_factory=list)
+    rechecked: set[Path] = field(default_factory=set)
+    engine_meta: dict[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class LanguageAdapter(Protocol):
+    """The per-language analyzer interface (design.md §3.4, normative; FR-23)."""
+
+    language: str  # namespace token, e.g. "python" — the §4.1 node-ID namespace
+
+    def recognizes(self, path: Path, first_line: bytes | None) -> bool:
+        """Does this adapter claim `path` as one of its source files?
+
+        `first_line` is the head of the file (or None when the caller has not read it),
+        so an extensionless file can be claimed on its shebang without every adapter
+        re-opening it.
+        """
+        ...
+
+    def analyze(
+        self,
+        root: Path,
+        files: list[SourceFile],
+        cache_dir: Path,
+        changed: set[Path] | None,
+        progress: ProgressSink,
+    ) -> AdapterResult:
+        """Analyze `files` under `root`, returning schema-conformant fragments.
+
+        `cache_dir` is a directory the adapter owns for its engine's incremental cache.
+        `changed` is the incremental hint — the files whose content changed since the
+        last run, or None on a full run; an adapter may narrow its work with it but must
+        still return a fragment for every file handed in. `progress` is the run's stderr
+        channel (FR-41): countable work advances it, an opaque engine call runs inside
+        `progress.heartbeat(...)`.
+        """
+        ...
+
+
+def adapter_for(
+    adapters: Sequence[LanguageAdapter], path: Path, first_line: bytes | None
+) -> LanguageAdapter | None:
+    """The first adapter in `adapters` that claims `path`, or None.
+
+    Order is precedence: the list is the pipeline's configured analyzer order, and the
+    first claim wins so that one file can never be analyzed twice under two languages.
+    """
+    for adapter in adapters:
+        if adapter.recognizes(path, first_line):
+            return adapter
+    return None

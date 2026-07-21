@@ -3,9 +3,9 @@
 design.md §3.1 (responsibility and interface), §5.1 (the CLI surface), D10 (exit codes).
 Satisfies FR-43 (AC-43.1-3) and FR-32's console script.
 
-The subcommand *behavior* lands in later tasks: `analyze` in task 1.5, the `query`
-subcommands in task 3.5, `view` in task 5.1. This module owns the parsing, the
-top-level exception trap, and the exit-code plumbing only.
+The subcommand *behavior* lands with the components behind it: `analyze` is wired to
+`runner` here, the `query` subcommands arrive in task 3.5, `view` in task 5.1. This
+module owns the parsing, the top-level exception trap, and the exit-code computation.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import traceback
 from collections.abc import Sequence
 from pathlib import Path
 
-from pastapathfinder import __version__
+from pastapathfinder import __version__, runner
 
 # D10: three mutually distinct exit codes (FR-43). argparse exits 2 natively on
 # usage errors, which places them in the failure category by construction; Python's
@@ -159,8 +159,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def exit_code_for(result: runner.RunResult) -> int:
+    """Map a run result to its process exit code (design.md §3.1, D10; FR-43).
+
+    0 when the run completed with nothing skipped (AC-43.1), 1 when it completed with at
+    least one skipped file (AC-43.2), 2 when it did not complete (AC-43.3). A run that
+    did not complete normally raises instead of returning, so the failure branch here is
+    the belt to `main()`'s braces.
+    """
+    if not result.completed:
+        return EXIT_FAILURE
+    return EXIT_PARTIAL if result.files_skipped else EXIT_SUCCESS
+
+
 def _handle_analyze(args: argparse.Namespace) -> int:
-    raise NotImplementedError("analyze is not implemented yet (specs/tasks.md task 1.5)")
+    result = runner.run_analysis(
+        args.root,
+        out=args.out,
+        config_path=args.config,
+        full=args.full,
+    )
+    return exit_code_for(result)
 
 
 def _handle_query_entry_points(args: argparse.Namespace) -> int:

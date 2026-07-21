@@ -74,7 +74,7 @@
     - EC-10: an empty root, and a root containing zero recognized sources, both complete with zero candidates.
     - Pruning: a fixture with 500 files under an excluded directory yields exactly one exclusion record for that directory and zero enumerated files beneath it.
 
-- [ ] **Task 1.5 — `adapters/base.py`, `runner.py`, `reports.py`, `progress.py`: end-to-end `analyze` with a stub adapter**
+- [x] **Task 1.5 — `adapters/base.py`, `runner.py`, `reports.py`, `progress.py`: end-to-end `analyze` with a stub adapter**
   - **Deliverable:** The `LanguageAdapter` protocol exactly as given in design.md §3.4; the run orchestrator following design.md §1's order; writers for the six JSON reports of design.md §5.3 (each stamping `format_version: 1`) plus their stdout renderings generated from the parsed JSON; the stderr progress sink; the `--out` directory derivation of design.md §5.1; and `docs/report-formats.md` + `docs/exit-codes.md` documenting what this task ships. A stub adapter under `tests/` (a test double, not product code) supplies fragments so the whole path is exercisable now.
   - **References:** design.md §3.4, §3.10 (`reports`, `progress`, `runner`), §3.1 (exit-code computation), §5.1, §5.3, §5.4, D9, D10; requirements FR-5, FR-7, FR-23 (structure), FR-34, FR-41, FR-42, FR-43.
   - **Dependencies:** 1.2, 1.4.
