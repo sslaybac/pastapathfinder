@@ -50,7 +50,7 @@
     - AC-21.2/AC-40.3: queries over nodes/edges succeed when `attrs` is `{}` and when `is_ambiguous` is absent/0.
     - FR-44: writing the same fragment set twice in different insertion orders produces byte-identical database content apart from the §5.4 volatile `meta` keys (`created_at`, `run_id`).
 
-- [ ] **Task 1.3 — `config.py` + `exclusions.py`: the layered rule engine**
+- [x] **Task 1.3 — `config.py` + `exclusions.py`: the layered rule engine**
   - **Deliverable:** TOML config loading (design.md §5.5) and the `pathspec`/gitwildmatch `RuleSet` composing, in precedence order, the common convention set (`.git/`), the normative v1 Python convention set (design.md §3.3), every `.gitignore` in the tree, user `exclude`, and user `reinclude` as highest-precedence negation — with every match attributed `(pattern, source)` where source ∈ `default:common | default:python | gitignore:<relpath> | user:exclude`.
   - **References:** design.md §3.2, §3.3 (`exclusions`), §5.5, D11; requirements FR-2, FR-3, FR-4, FR-5 (data side), OQ-3's settled list.
   - **Dependencies:** 1.1.
