@@ -91,7 +91,7 @@
 
 ### Milestone 2 — Real Python call graph
 
-- [ ] **Task 2.1 — `adapters/python/mypy_driver.py`: the engine boundary**
+- [x] **Task 2.1 — `adapters/python/mypy_driver.py`: the engine boundary**
   - **Deliverable:** The only module that calls mypy. Builds `Options` with the normative settings of design.md §3.5 (`incremental=True`, `cache_dir=<out>/mypy_cache`, `export_types=True`, `preserve_asts=True`, `check_untyped_defs=True`, `no_site_packages=True`, per-module `ignore_missing_imports=True` for `*`, `follow_imports="normal"`, error display suppressed), calls `mypy.build.build()`, exposes `BuildResult.graph`/`.types`, the build manager's **rechecked-modules** report, and `engine_meta`; converts per-file failures to `SkipRecord`s; converts a whole-build crash to a one-shot full-rebuild fallback (cache wiped) and fails the run with the engine error if the rebuild also crashes; drives the design.md §3.10 heartbeat during the opaque build phase.
   - **References:** design.md §3.5 (`mypy_driver`), D1, D1a, D13, §3.10 (`progress`); requirements FR-6, FR-13, FR-24 (AC-24.3 entry point), FR-41 (AC-41.2).
   - **Dependencies:** 1.5.
