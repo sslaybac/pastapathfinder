@@ -143,7 +143,7 @@
     - AC-36.4 (failure): a site with neither a resolution nor an import-table entry produces an `unresolved_call` diagnostic — a guessed external name is never fabricated. A unit test asserts no external node has an outgoing edge and none carries a span (AC-37.2).
     - Evidence anchor: source (b) measured 100 % precision on the relevant category (`FINDINGS-namematch.md` §2, `external` row) — that measurement is why this mechanism is in scope; do not extend it into general name matching, which is backlog B-22 and out of v1 scope.
 
-- [ ] **Task 2.5 — Wire the Python adapter into the run; validate against Django core**
+- [x] **Task 2.5 — Wire the Python adapter into the run; validate against Django core**
   - **Deliverable:** The stub adapter is replaced by `adapters.python` in the real run path; the runner reconciles adapter output into coverage/skip/diagnostics reporting; `pastapathfinder analyze` produces a populated index for a real codebase.
   - **References:** design.md §1 (data flow), §3.4, §3.10 (`runner`), §7; requirements FR-6, FR-7, FR-12, FR-23, FR-29 (AC-29.1).
   - **Dependencies:** 2.4.

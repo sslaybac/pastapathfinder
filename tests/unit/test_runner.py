@@ -393,9 +393,11 @@ def test_a_candidate_no_adapter_claims_fails_by_name(tree, out_dir):
     assert "pkg/__init__.py" in str(raised.value)
 
 
-def test_this_build_registers_no_adapters_yet():
-    """Task 2.5 wires `adapters.python` in; until then the registry is honestly empty."""
-    assert runner.default_adapters() == ()
+def test_this_build_registers_the_python_adapter():
+    """FR-23: v1's one language is registered, and it satisfies the §3.4 protocol."""
+    (adapter,) = runner.default_adapters()
+    assert isinstance(adapter, LanguageAdapter)
+    assert adapter.language == "python"
 
 
 def test_an_extensionless_python_script_is_claimed_on_its_shebang(tree, out_dir):

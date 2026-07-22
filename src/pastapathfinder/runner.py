@@ -27,13 +27,14 @@ import hashlib
 import os
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
 from pastapathfinder import __version__, reports
 from pastapathfinder.adapters.base import AdapterResult, LanguageAdapter, SourceFile, adapter_for
+from pastapathfinder.adapters.python import PythonAdapter
 from pastapathfinder.config import Config, load_config
 from pastapathfinder.discovery import PROBE_BYTES, DiscoveryResult, discover
 from pastapathfinder.exclusions import build_ruleset
@@ -101,13 +102,12 @@ class RunResult:
 def default_adapters() -> tuple[LanguageAdapter, ...]:
     """The language adapters this build registers, in precedence order (FR-23).
 
-    Empty until task 2.5 wires `adapters.python` in: the graph extractor does not exist
-    yet, and a placeholder that claimed files without analyzing them would report a
-    successful analysis of nothing. Runs with candidate files therefore fail by name
-    rather than silently under-reporting (FR-7's whole point), while a run over a tree
-    with no sources still completes (EC-10).
+    One, because v1 analyzes one language (requirements §6 item 6). The tuple is the
+    whole of the pipeline's knowledge that an engine exists: `adapters.python` is the only
+    package that imports one (AC-23.1), and nothing here or downstream refers to mypy by
+    name — an index's `meta.engine` is whatever the adapter reports having used.
     """
-    return ()
+    return (PythonAdapter(),)
 
 
 # ---------------------------------------------------------------------------
@@ -274,15 +274,11 @@ def run_analysis(
         analysis = _analyze(discovered, registered, out_dir / CACHE_DIRNAME, progress)
 
     analyzed = [
-        fragment
+        fragment.file.path
         for fragment in analysis.fragments
         if fragment.file.status == reports.STATUS_ANALYZED
     ]
-    skipped = [
-        fragment
-        for fragment in analysis.fragments
-        if fragment.file.status == reports.STATUS_SKIPPED
-    ]
+    skipped = _skip_reasons(analysis)
 
     counts = reports.coverage_counts(
         discovered=len(discovered.candidates) + len(discovered.excluded),
@@ -299,8 +295,9 @@ def run_analysis(
 
     meta = {
         "tool_version": __version__,
-        # No adapter ran means no engine ran; the index says so rather than naming an
-        # engine that was never used. Task 2.5 supplies the real values.
+        # Whatever the adapter reports having used, and "none" when no adapter ran at all
+        # (a tree with no recognized sources): the index names an engine it was analyzed
+        # with, never one that was merely available.
         "engine": str(analysis.engine_meta.get("engine", "none")),
         "engine_version": str(analysis.engine_meta.get("engine_version", "none")),
         "root_path": str(discovered.root),
@@ -311,7 +308,7 @@ def run_analysis(
         store.write_fragments(analysis.fragments)
 
     run = run.finish(time.monotonic() - started)
-    documents = _documents(run, discovered, analysis, counts, skipped, diagnostics)
+    documents = _documents(run, discovered, analysis, counts, analyzed, skipped, diagnostics)
     report_paths = {
         filename: reports.write_report(reports_dir, filename, document)
         for filename, document in documents.items()
@@ -333,28 +330,38 @@ def run_analysis(
     )
 
 
+def _skip_reasons(analysis: AdapterResult) -> dict[str, str]:
+    """`{path: human-readable reason}` for every file the adapter did not analyze (AC-7.2).
+
+    Two sources that normally agree file for file: the fragment a skipped file still
+    contributes (its `files` row, carrying the schema's reason class) and the `SkipRecord`
+    carrying the words a human reads. They diverge in exactly one direction — a file whose
+    bytes could not be read has no content hash and therefore no `files` row, so it arrives
+    as a record alone (design.md §3.4) — and taking the union is what keeps such a file in
+    the coverage report instead of vanishing from FR-7's arithmetic.
+    """
+    reasons = {
+        fragment.file.path: fragment.file.skip_reason or "not analyzed"
+        for fragment in analysis.fragments
+        if fragment.file.status == reports.STATUS_SKIPPED
+    }
+    for record in analysis.skipped:
+        reasons[record.path] = record.detail or record.reason
+    return reasons
+
+
 def _documents(
     run: reports.RunInfo,
     discovered: DiscoveryResult,
     analysis: AdapterResult,
     counts: dict[str, int],
-    skipped: Sequence[GraphFragment],
+    analyzed: Sequence[str],
+    skipped: Mapping[str, str],
     diagnostics: Sequence[Diag],
 ) -> dict[str, dict[str, object]]:
     """Build all six §5.3 documents. The coverage document asserts AC-7.1 as it is built."""
-    reasons = {record.path: (record.detail or record.reason) for record in analysis.skipped}
-    rows = [
-        reports.analyzed_row(fragment.file.path)
-        for fragment in analysis.fragments
-        if fragment.file.status == reports.STATUS_ANALYZED
-    ]
-    rows += [
-        reports.skipped_row(
-            fragment.file.path,
-            reasons.get(fragment.file.path, fragment.file.skip_reason or "not analyzed"),
-        )
-        for fragment in skipped
-    ]
+    rows = [reports.analyzed_row(path) for path in analyzed]
+    rows += [reports.skipped_row(path, reason) for path, reason in skipped.items()]
     rows += [reports.excluded_row(record) for record in discovered.excluded]
 
     # No detector has run yet (tasks 3.1-3.3), so a run's entry points are whatever the

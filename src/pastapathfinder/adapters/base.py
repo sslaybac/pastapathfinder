@@ -15,6 +15,11 @@ status of `analyzed` or `skipped`. A skipped file yields a fragment with that st
 skip reason, and no nodes — the `files` row is what FR-24's hash gate and FR-38's change
 check read later — *plus* one `SkipRecord` carrying the human-readable reason for the
 coverage report (AC-7.2). A per-file failure never aborts the run (FR-6).
+
+One case escapes that contract, and only one: a file whose bytes could not be read at all
+has no content hash, so it can have no `files` row. It yields a `SkipRecord` alone, and
+`runner` counts it from that record — which is why FR-7's arithmetic reconciles over the
+union of the two, not over the fragments.
 """
 
 from __future__ import annotations
