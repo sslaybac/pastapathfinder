@@ -105,7 +105,7 @@
     - AC-41.2: the build phase emits `analyzing (engine build) … {elapsed}s` at ≤ 5 s intervals.
     - A timed cold build over the pinned Django `django/` package completes (reference: build 10.5 s, 390 MB peak RSS — `FINDINGS-mypy.md` Q2).
 
-- [ ] **Task 2.2 — `normalize.py` + `extract.py` part 1: nodes, spans, `contains` and `imports` edges**
+- [x] **Task 2.2 — `normalize.py` + `extract.py` part 1: nodes, spans, `contains` and `imports` edges**
   - **Deliverable:** Node-ID construction per the §4.1 grammar (module-name derivation from relpath, `<lambda#N>` per-scope counter, `@line` collision suffixing); the AST walk emitting the file node, the module-body node (`kind='module'` per D16, `attrs.python_role="module_body"`), function/method/class nodes with `file_path`/`start_line`/`end_line`, `contains` edges (file→defs, class→methods), and `imports` edges (file→file, restricted to analyzed files).
   - **References:** design.md §3.5 (`normalize`, `extract` — node half), §4.1, §4.2, D16; requirements FR-12 (node half), FR-21, FR-22, FR-37.
   - **Dependencies:** 2.1.

@@ -68,6 +68,25 @@ WELL_FORMED_IDS = [
     "python:entry:route_django:app.views.detail@30",
 ]
 
+#: §4.1's `module` is built from *path* segments (amended 2026-07-22, D22), so every
+#: filename discovery can hand the adapter derives a well-formed ID. The first two are
+#: real: 23 files of the pinned Django benchmark are numbered migrations, and dashed
+#: directory names are everywhere.
+WELL_FORMED_PATH_DERIVED_IDS = [
+    "python:django.contrib.auth.migrations.0001_initial.<module>",
+    "python:my-app.mod.func@12",
+    "python:pkg.locale.is.formats.<module>",  # a package named after a keyword
+    "python:pkg.mod v2.func",  # spaces are legal in filenames, so also in module names
+]
+
+#: Forms D22's widening made legal that nothing in the pipeline produces. They are listed
+#: rather than dropped so the consequence stays visible: `normalize.py` is the only
+#: producer of the bracketed segments, and that is where their shape is tested.
+LEGAL_BUT_UNPRODUCED_IDS = [
+    "python:pkg.mod.<lambda>",  # unnumbered — normalize.py always numbers
+    "python:<module>.pkg",  # a module-body segment in leading position
+]
+
 MALFORMED_IDS = [
     "pkg.mod.func",  # AC-22.2: no language namespace
     ":pkg.mod.func",  # empty namespace
@@ -78,14 +97,14 @@ MALFORMED_IDS = [
     "python:file:../escape.py",  # ... and normalized
     "python:file:pkg\\win.py",  # ... and POSIX-style
     "python:pkg..mod",  # empty segment
-    "python:9pkg.mod",  # segment is not an identifier
-    "python:pkg.mod func",  # spaces are not legal in a qualname
+    "python:.pkg.mod",  # ... in leading position
+    "python:pkg.mod.",  # ... and trailing
+    "python:pkg/mod.func",  # a path separator never survives the §4.1 derivation
     "python:pkg.mod.func@",  # line suffix without a line
     "python:pkg.mod.func@x",
+    "python:pkg.mod@1.func",  # the line suffix is last, or it is not a suffix
     "python:entry:main_block:pkg.mod.<module>",  # entry IDs carry a line
     "python:entry:no_such_detector:pkg.mod.func@1",
-    "python:pkg.mod.<lambda>",  # the lambda form is numbered
-    "python:<module>.pkg",  # a module name is dotted identifiers
     "PYTHON:pkg.mod.func",  # the namespace token is exact
     "python:pkg.mod.func\n",  # no trailing newline sneaks past fullmatch
 ]
@@ -94,6 +113,12 @@ MALFORMED_IDS = [
 @pytest.mark.parametrize("node_id", WELL_FORMED_IDS)
 def test_grammar_accepts_every_form_of_id(node_id):
     """AC-22.1: every ID the pipeline emits is a §4.1 ID."""
+    assert is_valid_node_id(node_id)
+
+
+@pytest.mark.parametrize("node_id", WELL_FORMED_PATH_DERIVED_IDS + LEGAL_BUT_UNPRODUCED_IDS)
+def test_grammar_accepts_path_derived_module_names(node_id):
+    """D22: `module` is dotted *path* segments, so no legal filename fails validation."""
     assert is_valid_node_id(node_id)
 
 

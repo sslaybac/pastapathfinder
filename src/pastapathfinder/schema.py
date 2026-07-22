@@ -100,13 +100,16 @@ DETECTORS: tuple[str, ...] = (
     "route_django",
 )
 
-# `[^\W\d]\w*` is a Python identifier, including the non-ASCII ones the language allows.
-_IDENTIFIER = r"[^\W\d]\w*"
-# segment := identifier | "<module>" | "<lambda#" N ">"
-_SEGMENT = rf"(?:{_IDENTIFIER}|<module>|<lambda\#\d+>)"
-# qualname := module { "." segment } — a module name is dotted identifiers, so only the
-# trailing segments may take the bracketed forms.
-_QUALNAME = rf"{_IDENTIFIER}(?:\.{_SEGMENT})*"
+# mod_seg := any non-empty run of characters other than the grammar's own delimiters and
+# the path separators the §4.1 derivation has already consumed (amended 2026-07-22, D22).
+# A module segment is a *path* segment, not a Python identifier: `0001_initial.py` and
+# `my-app/` are ordinary inputs, and 23 files of the pinned Django benchmark are the
+# former. `mod_seg` subsumes the `segment` production (`identifier | "<module>" |
+# "<lambda#" N ">"`), so `qualname := module { "." segment }` collapses to a run of module
+# segments — D22 records that consequence, and `normalize.py` remains the only producer of
+# the bracketed forms.
+_MODULE_SEGMENT = r"[^.:@/\\\x00-\x1f]+"
+_QUALNAME = rf"{_MODULE_SEGMENT}(?:\.{_MODULE_SEGMENT})*"
 # relpath is POSIX-style and root-relative (§4.1): no leading "/", no "." or ".."
 # segment, no backslash, no control characters.
 _PATH_SEGMENT = r"(?!\.\.?(?:/|\Z))[^/\\\x00-\x1f]+"
