@@ -155,7 +155,7 @@
 
 ### Milestone 3 — Entry points and queries
 
-- [ ] **Task 3.1 — `detectors/`: registry, error isolation, and the `__main__` detector**
+- [x] **Task 3.1 — `detectors/`: registry, error isolation, and the `__main__` detector**
   - **Deliverable:** `detectors/base.py` + `registry.py` holding the ordered list of design.md §3.7, the two detector shapes (per-module: `(module_path, stdlib_ast_tree, import_table)`; project-level: the metadata file set), per-detector exception wrapping, entry-node emission (`kind='entry_point'`, §4.1 ID form, one `calls` edge to the target), and `main_block.py`.
   - **References:** design.md §3.7, §4.1, D14, D18; requirements FR-8, FR-9.
   - **Dependencies:** 2.5.
