@@ -217,6 +217,7 @@
 
 - [ ] **Task 4.1 — `incremental.py`: hash gate, evict-and-merge, fallback, re-analysis report**  ⚠ *highest-risk*
   - **Deliverable:** `plan_run(index, candidates) -> RunPlan` and `merge(index, result, plan) -> MergeReport` implementing design.md §3.6, plus `reanalysis.json` population and the `--full` override.
+  - **Handoff from task 2.5 (recorded 2026-07-22):** `adapters.python` discards the mypy cache before **every** build and re-derives the whole graph, because task 2.5 has no incremental path and its wholesale `full_write` needs a complete adapter result — a warm 2.3.0 build returns no trees and no types, so extracting from one would publish an index that had silently lost nearly every edge (D6 rule 1). This task removes that unconditional wipe: pass a real `changed` set through the §3.4 `changed` parameter (currently always `None`), stop re-deriving files the plan excludes, and let the merge preserve the rest. `incremental=True` only begins to buy cross-run reuse here; until then it merely writes a cache the same run never reads.
   - **References:** design.md §3.6, D6, D18, §5.3; requirements FR-24 (incl. C-9's transitive-closure floor), FR-30, FR-35, EC-7, EC-13 (pipeline half).
   - **Dependencies:** 2.5, 3.1–3.3 (detector recomputation is part of the merge order), 3.4 (reachability recomputation).
   - **Verification — the three D6 rules are normative and each has a named failure mode proven in `FINDINGS-session5.md` Part 1:**
