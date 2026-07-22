@@ -111,6 +111,84 @@ def test_walker_coverage_on_the_pinned_django_benchmark(tmp_path):
     assert coverage >= MINIMUM_COVERAGE
 
 
+def test_call_resolution_rates_on_the_pinned_django_benchmark(tmp_path):
+    """Record what the §3.5 ladder resolves on real code (specs/tasks.md task 2.3).
+
+    **Recall is deliberately not a pass/fail criterion here.** design.md R3 and requirements
+    C-11 record the ceiling as accepted: mypy is a soundness checker, so on unannotated
+    legacy code it offers no target and the site becomes an `unresolved_call` diagnostic
+    rather than an edge. The prototype measured 13,786 unresolved of 37,218 sites (37 %);
+    this test prints the product's own number so the two can be compared, and asserts only
+    the invariants that *would* be defects: every edge endpoint exists, no file node calls,
+    and every site is accounted for as an edge, a hand-off, or a diagnostic.
+    """
+    package = benchmark_package()
+    paths = sorted(package.rglob("*.py"))
+    sources = [
+        SourceFile(path=path, relpath=path.relative_to(package).as_posix()) for path in paths
+    ]
+    outcome = run_build(sources, tmp_path / "mypy_cache", ProgressSink(stream=io.StringIO()))
+    index = extract.module_index(outcome.sources)
+    extractions = {
+        source.relpath: extract.extract_file(source, outcome.tree(source.relpath), index)
+        for source in outcome.sources
+        if outcome.tree(source.relpath) is not None
+    }
+    known = {node.id for extraction in extractions.values() for node in extraction.nodes}
+    file_ids = {
+        node.id
+        for extraction in extractions.values()
+        for node in extraction.nodes
+        if node.kind == "file"
+    }
+
+    started = time.perf_counter()
+    targets = extract.TargetIndex.build(
+        outcome.sources, [node for extraction in extractions.values() for node in extraction.nodes]
+    )
+    sites = edges = ambiguous = external = unresolved = 0
+    for source in outcome.sources:
+        extraction = extractions.get(source.relpath)
+        if extraction is None:  # pragma: no cover - a cold build gives every file a tree
+            continue
+        resolution = extract.resolve_calls(source, extraction, outcome.types, targets)
+        sites += len(extraction.call_sites)
+        edges += len(resolution.edges)
+        ambiguous += sum(edge.is_ambiguous for edge in resolution.edges)
+        external += len(resolution.external_calls)
+        unresolved += len(resolution.diagnostics)
+
+        accounted: set[tuple[int, int]] = set()
+        for edge in resolution.edges:
+            assert edge.src in known and edge.dst in known, edge
+            assert edge.src not in file_ids, edge
+            accounted.update((line, col) for line, col in edge.attrs["call_sites"])
+        for call in resolution.external_calls:
+            accounted.update(call.call_sites)
+        accounted.update(
+            (diag.line, diag.col)
+            for diag in resolution.diagnostics
+            if diag.line is not None and diag.col is not None
+        )
+        # FR-14's "never silently drop", checked position by position: every call site the
+        # walk found is either an edge, a hand-off, or a diagnostic.
+        located = {
+            (site.line, site.col)
+            for site in extraction.call_sites
+            if site.line is not None and site.col is not None
+        }
+        assert located <= accounted, (source.relpath, sorted(located - accounted)[:5])
+    resolve_seconds = time.perf_counter() - started
+
+    print(
+        f"\ncall resolution: {sites} sites over {len(extractions)} files in "
+        f"{resolve_seconds:.1f} s -> {edges} calls edges ({ambiguous} ambiguous), "
+        f"{external} external hand-offs, {unresolved} unresolved diagnostics "
+        f"({unresolved / sites:.1%} of sites; prototype reference 37 %)"
+    )
+    assert edges > 0 and external > 0
+
+
 def test_extraction_over_the_pinned_django_benchmark(tmp_path):
     """Every analyzed file extracts, and every row it produces is a §4.1/§4.2 row."""
     from pastapathfinder.schema import FileRecord, GraphFragment, validate_fragment

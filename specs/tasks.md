@@ -118,7 +118,7 @@
     - Exactly one `module` node per analyzed file, ID ending `.<module>`, `kind='module'` (D16) — a test asserts it validates against the §4.2 CHECK set and that no `file` node carries outgoing `calls` edges.
     - Walker coverage on the pinned Django benchmark is ≥ 99.9 % of enumerated call sites (reference: 37,207 / 37,218 matched, 0.03 % miss — `FINDINGS-mypy.md` §2).
 
-- [ ] **Task 2.3 — `extract.py` part 2: the call-resolution ladder and ambiguity flags**  ⚠ *highest-risk*
+- [x] **Task 2.3 — `extract.py` part 2: the call-resolution ladder and ambiguity flags**  ⚠ *highest-risk*
   - **Deliverable:** `calls` edges per design.md §3.5's normative ladder — bound `NameExpr`/`MemberExpr` `.node` fullname → single target; instance member via the expression-type map → `TypeInfo.get(name)` through the real MRO; constructor `C()` → `__init__` through the MRO; multiple candidates (overloads, union receivers) → one edge each with `is_ambiguous=1`; typeshed/out-of-set fullnames handed to `externals.py` (task 2.4); nothing at all → an `unresolved_call` diagnostic carrying file/line/col and the callee source text. Multiple call sites for one `(src, dst)` collapse into one edge with sorted `attrs.call_sites`.
   - **References:** design.md §3.5, §4.2, §4.3, D1, D16, R3, and requirements C-11's documented gap; requirements FR-12, FR-14, FR-40.
   - **Dependencies:** 2.2.
