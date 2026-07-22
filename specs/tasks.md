@@ -167,7 +167,7 @@
     - AC-8.2 (failure): a detector raising on one file produces a `detector_error` diagnostic naming detector and file while every other detector still runs over every other file.
     - Detectors parse with **stdlib `ast`**, not mypy trees, so isolation holds even where semantic analysis failed — asserted by a test in which the mypy build produced no tree for a file that still parses under `ast`.
 
-- [ ] **Task 3.2 — `detectors/console_scripts.py`: packaging-declared CLI entry points**
+- [x] **Task 3.2 — `detectors/console_scripts.py`: packaging-declared CLI entry points**
   - **Deliverable:** Static extraction of `[project.scripts]` and `[project.entry-points.console_scripts]` from `pyproject.toml`, `[options.entry_points]` from `setup.cfg`, and a literal `entry_points` argument from `setup.py` via an `ast` walk; resolution of `pkg.mod:func` against index node IDs.
   - **References:** design.md §3.7 (`console_scripts`); requirements FR-10 (and C-1's packaging-only scope), FR-13.
   - **Dependencies:** 3.1.

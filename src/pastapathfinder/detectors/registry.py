@@ -6,8 +6,8 @@ on every proceeding run and hold no cross-run state); requirements FR-8 (AC-8.1,
 FR-9.
 
 `DETECTORS` is the ordered list of design.md §3.7. It holds only detectors whose task has
-run: `MainBlockDetector` today; task 3.2 appends `ConsoleScriptsDetector`, task 3.3 the
-two route detectors. That is the whole registration mechanism — appending one entry — so
+run: `MainBlockDetector` and `ConsoleScriptsDetector` today; task 3.3 appends the two route
+detectors. That is the whole registration mechanism — appending one entry — so
 adding a detector touches one new module plus this one line and nothing else (AC-8.1); the
 core schema is never edited to add a detector.
 
@@ -36,11 +36,12 @@ from pastapathfinder.detectors.base import (
     ProjectDetector,
     ProjectInput,
 )
+from pastapathfinder.detectors.console_scripts import ConsoleScriptsDetector
 from pastapathfinder.detectors.main_block import MainBlockDetector
 from pastapathfinder.schema import Diag, EdgeRow, NodeRow
 
 #: The ordered detector list of design.md §3.7. Extended by one entry per detector task.
-DETECTORS: tuple[Detector, ...] = (MainBlockDetector(),)
+DETECTORS: tuple[Detector, ...] = (MainBlockDetector(), ConsoleScriptsDetector())
 
 
 def _run_module(detector: ModuleDetector, module: ModuleInput) -> DetectorOutput:

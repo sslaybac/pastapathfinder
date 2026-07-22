@@ -146,16 +146,28 @@ class ModuleInput:
 
 @dataclass(frozen=True, slots=True)
 class ProjectInput:
-    """What a project-level detector reads: the packaging metadata file set (FR-10)."""
+    """What a project-level detector reads: the packaging metadata file set (FR-10).
+
+    `node_ids` is the set of code-node IDs already in the index for this run — the
+    resolution target for `console_scripts`, whose declarations (`pkg.mod:func`) name a
+    function the analyzed code may or may not contain (design.md §3.7: "resolve `pkg.mod:func`
+    against index node IDs"). It rides on the input rather than the detector so a
+    project-level detector stays constructible with no arguments (it lives in the static
+    registry, design.md §3.7) and so the run stays a pure function of what it is handed
+    (D18): the runner (task 3.4) passes the index's IDs, and a test passes its own. The
+    default is empty, which resolves nothing — a project with no analyzed graph declares no
+    reachable console script, which is the honest answer, not a crash.
+    """
 
     root: Path
     metadata_files: Mapping[str, Path]  # `{filename: path}` for those present at the root
+    node_ids: frozenset[str] = frozenset()  # index code-node IDs, the resolution target
 
     @classmethod
-    def discover(cls, root: Path) -> ProjectInput:
+    def discover(cls, root: Path, node_ids: frozenset[str] = frozenset()) -> ProjectInput:
         """The metadata files present at the analysis root, keyed by filename."""
         present = {name: root / name for name in METADATA_FILENAMES if (root / name).is_file()}
-        return cls(root=root, metadata_files=present)
+        return cls(root=root, metadata_files=present, node_ids=node_ids)
 
 
 # ---------------------------------------------------------------------------
