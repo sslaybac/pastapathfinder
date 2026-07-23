@@ -271,8 +271,11 @@ def test_the_remaining_reports_are_produced_empty_on_a_clean_run(tree, out_dir):
 
 
 def test_detected_entry_points_clear_the_no_entry_points_warning(tree, out_dir):
-    root = tree(SIMPLE_TREE)
-    result, _, _ = analyze(root, out_dir, StubAdapter(entry_points=True))
+    # D18: entry points come from the wholesale detector pass, not from the adapter. A
+    # `__main__` block is what `main_block` recognizes, and its target is the module-body
+    # node the stub emits for the file — so a real detector clears the warning.
+    root = tree({"pkg/__init__.py": "", "pkg/app.py": 'if __name__ == "__main__":\n    pass\n'})
+    result, _, _ = analyze(root, out_dir)
     assert report(result, reports.DEADCODE_REPORT)["no_entry_points_warning"] is False
 
 

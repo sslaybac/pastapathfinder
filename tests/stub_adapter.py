@@ -48,15 +48,17 @@ class StubAdapter:
     * `skip` maps a relpath to the human-readable reason it was skipped (AC-7.2).
     * `skip_reason` is the schema reason class those skips carry.
     * `diagnostics` are emitted verbatim into the run's diagnostics report.
-    * `entry_points` adds an `entry_point` node per file, for tests that need one.
     * `phantom_files` emits fragments for files that were never handed in — a
       deliberately inconsistent adapter, used to prove AC-7.1's reconciliation fires.
+
+    It emits no `entry_point` nodes: those are the detectors' (D18), recomputed wholesale by
+    the runner over the analyzed files' stdlib ASTs, so a test that wants one gives a file a
+    `__main__` block rather than asking the adapter to fabricate the node.
     """
 
     skip: Mapping[str, str] = field(default_factory=dict)
     skip_reason: str = "parse_error"
     diagnostics: Sequence[Diag] = ()
-    entry_points: bool = False
     phantom_files: Sequence[str] = ()
 
     language: str = "python"
@@ -75,6 +77,7 @@ class StubAdapter:
         cache_dir: Path,
         changed: set[Path] | None,
         progress: ProgressSink,
+        prior_nodes=None,
     ) -> AdapterResult:
         self.seen.extend(files)
         fragments: list[GraphFragment] = []
@@ -142,21 +145,6 @@ class StubAdapter:
             EdgeRow(src=file_id, dst=module_id, kind="contains", src_file=relpath),
             EdgeRow(src=file_id, dst=function_id, kind="contains", src_file=relpath),
         ]
-        if self.entry_points:
-            entry_id = f"python:entry:main_block:{module}@1"
-            nodes.append(
-                NodeRow(
-                    id=entry_id,
-                    kind="entry_point",
-                    name=module,
-                    language="python",
-                    file_path=relpath,
-                    start_line=1,
-                    end_line=1,
-                    attrs={"detector": "main_block"},
-                )
-            )
-            edges.append(EdgeRow(src=entry_id, dst=module_id, kind="calls", src_file=relpath))
         return GraphFragment(
             file=FileRecord(path=relpath, content_hash=digest, status="analyzed"),
             nodes=nodes,

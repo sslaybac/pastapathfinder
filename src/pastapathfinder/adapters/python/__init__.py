@@ -23,17 +23,28 @@ next step's input:
 Steps 3 and 4 need step 2 finished for every file before either can start on any file, which
 is why the phases are three passes rather than one loop.
 
-**Every call is a full analysis, and that is deliberate.** `changed` is §3.4's incremental
-hint; nothing computes one yet (`incremental.py` is task 4.1), so the runner passes `None`
-and the index is rebuilt wholesale on every run. A *warm* engine cache would silently break
-that: mypy re-type-checks nothing when nothing changed, so `BuildResult.types` comes back
-empty and the trees come back absent (measured on 2.3.0; the D6-rule-1 trap in
-`mypy_driver`'s docstring), and extracting under those conditions would produce a
-complete-looking index that had lost almost every edge. This adapter therefore discards the
-engine cache before every build rather than half-using it. The cache each run writes is
-left in place, so it is there for the run that learns to reuse it — reuse being the
-evict-and-merge discipline D6 makes normative and task 4.1 owns, which is not approximated
-here and not partially prepared for.
+**Full runs re-derive everything; incremental runs re-derive only what mypy re-checked.**
+`changed` is §3.4's incremental hint, and it is the switch between the two:
+
+* **`changed is None` — a full run.** The engine cache is discarded first, so mypy re-checks
+  every module cold; every file is extracted, resolved and returned. This is what the first
+  run of a codebase, and every `--full`, does.
+* **`changed` is a set — an incremental run (task 4.1).** The cache is kept, so mypy loads
+  the unchanged modules and re-type-checks only the changed files and their dependents — its
+  `rechecked_modules` report. Only those files are resolved and returned as fragments; the
+  merge (`incremental.merge`) preserves the rest. A warm build re-checks nothing it need not,
+  so `BuildResult.types` is populated *only* for the rechecked modules — resolving a
+  cache-loaded module would find no types and drop its edges (the D6-rule-1 trap). And a
+  cache-loaded module's tree comes back **stripped**: its `defs` are empty (measured on 2.3.0
+  even under `preserve_asts=True`), so its structure is no longer walkable either. The nodes a
+  re-extracted file must resolve *into* therefore come from `prior_nodes` — the index rows a
+  full run once wrote for those files (design.md §3.5's `TargetIndex`; `_target_index`) —
+  while the re-extracted files' nodes come fresh from this build.
+
+The re-extracted set is `rechecked_modules` unioned with the changed files themselves: a
+changed file that no longer parses is not in `rechecked_modules` (the engine never built it),
+yet it must still be re-emitted — as the skip it has become — so the merge evicts its stale
+graph. Nothing infers the set from tree presence (the trap that rule 1 forbids).
 
 **What a file costs when something goes wrong.** A per-file failure never stops the run
 (FR-6): the pre-flight turns an unparseable or undecodable file into a `SkipRecord` before
@@ -61,6 +72,7 @@ from pastapathfinder.schema import (
     Diag,
     FileRecord,
     GraphFragment,
+    NodeRow,
     SkipRecord,
 )
 
@@ -117,31 +129,62 @@ def _extract_all(
     return kept, extractions, skipped
 
 
+def _target_index(
+    outcome: BuildOutcome,
+    all_sources: Sequence[EngineSource],
+    extractions: dict[str, extract.FileExtraction],
+    emit: set[str],
+    changed: set[Path] | None,
+    prior_nodes: Sequence[NodeRow] | None,
+) -> extract.TargetIndex:
+    """The analyzed set addressable by fullname — this run's rows for what it re-extracted,
+    the index's rows for what it did not (design.md §3.5's `TargetIndex`).
+
+    On a full run every module is freshly and fully walked, so the index is built from the
+    extractions alone. On an incremental run the engine strips the ASTs of the cache-loaded
+    modules it did not re-type-check — their `defs` come back empty (measured on 2.3.0) — so
+    walking them yields no definitions; their nodes come from `prior_nodes` (the index rows a
+    full run once wrote for them) while the re-extracted files' nodes come fresh. The module
+    map spans every analyzed module either way (`outcome.sources`), so a fullname in a
+    preserved file still locates its file.
+    """
+    if changed is None:
+        nodes: list[NodeRow] = [node for one in extractions.values() for node in one.nodes]
+        return extract.TargetIndex.build(all_sources, nodes)
+    fresh = [node for relpath, one in extractions.items() if relpath in emit for node in one.nodes]
+    preserved = [
+        node
+        for node in (prior_nodes or ())
+        if node.file_path is not None and node.file_path not in emit
+    ]
+    return extract.TargetIndex.build(outcome.sources, [*fresh, *preserved])
+
+
 def _resolve_all(
     outcome: BuildOutcome,
-    sources: Sequence[EngineSource],
+    emit_sources: Sequence[EngineSource],
     extractions: dict[str, extract.FileExtraction],
+    targets: extract.TargetIndex,
     progress: ProgressSink,
 ) -> tuple[dict[str, extract.CallResolution], dict[str, externals.FileExternals]]:
-    """Resolve every file's call sites, then externalize what left the analyzed set.
+    """Resolve the re-extracted files' call sites against `targets`, then externalize.
 
-    The `TargetIndex` is built once over *every* extracted node, which is what lets a call
-    in one file resolve to a definition in another; `externals.resolve()` is told the same
-    set of analyzed modules, so a name inside it is never renamed as external (AC-36.4).
+    Resolution and externalization need the engine's types, which a warm build populates only
+    for the re-extracted set, so they run over `emit_sources` alone. The analyzed-module set
+    handed to `externals` is every module (`outcome.sources`), so a name in a preserved file
+    is never mistaken for an external one (AC-36.4). On a full run `emit_sources` is every
+    source, so this is exactly a full resolution.
     """
-    targets = extract.TargetIndex.build(
-        sources, [node for one in extractions.values() for node in one.nodes]
-    )
     resolutions: dict[str, extract.CallResolution] = {}
-    with progress.phase(PHASE_RESOLVE, total=len(sources)):
-        for source in sources:
+    with progress.phase(PHASE_RESOLVE, total=len(emit_sources)):
+        for source in emit_sources:
             resolutions[source.relpath] = extract.resolve_calls(
                 source, extractions[source.relpath], outcome.types, targets
             )
             progress.advance()
     leaves = externals.resolve(
-        [(source, resolutions[source.relpath]) for source in sources],
-        [source.module for source in sources],
+        [(source, resolutions[source.relpath]) for source in emit_sources],
+        [source.module for source in outcome.sources],
     )
     return resolutions, leaves
 
@@ -152,23 +195,32 @@ def _fragments(
     resolutions: dict[str, extract.CallResolution],
     leaves: dict[str, externals.FileExternals],
     skipped: list[SkipRecord],
+    emit: set[str],
 ) -> list[GraphFragment]:
-    """One `GraphFragment` per file whose bytes were read, in path order (§3.4, §4.3).
+    """One `GraphFragment` per re-extracted file whose bytes were read (§3.4, §4.3).
 
     An analyzed file's fragment carries everything attributed to it: its own definitions
     and the external leaves it calls, plus its `contains`, `imports` and `calls` edges. A
     skipped file's fragment carries its `files` row and nothing else — which is what makes
     the skip visible to FR-24's hash gate and FR-38's change check on the next run.
 
-    `skipped` is extended in place for any file this run has a hash for but no result of
-    either kind, so no read file can leave the adapter unaccounted for.
+    `emit` is the re-extracted set — every file on a full run, the rechecked-and-changed set
+    on an incremental one — so a file the merge is preserving contributes no fragment and is
+    never touched. `skipped` is extended in place for any *emitted* file this run has a hash
+    for but no result of either kind, so no re-extracted file leaves the adapter unaccounted
+    for. A file resolved for its `TargetIndex` structure but not in `emit` is skipped here.
     """
     reasons = {record.path: record for record in skipped}
     fragments: list[GraphFragment] = []
-    for relpath in sorted(outcome.content_hashes):
-        digest = outcome.content_hashes[relpath]
+    for relpath in sorted(emit):
+        digest = outcome.content_hashes.get(relpath)
+        if digest is None:
+            # A re-extracted file whose bytes could not be read: it has no content hash and
+            # therefore no `files` row, so it leaves a `SkipRecord` (already in `skipped`)
+            # and no fragment. The merge evicts its stale graph from the file set anyway.
+            continue
         extraction = extractions.get(relpath)
-        if extraction is not None:
+        if extraction is not None and relpath in resolutions:
             leaf = leaves[relpath]
             fragments.append(
                 GraphFragment(
@@ -194,6 +246,31 @@ def _fragments(
             )
         )
     return fragments
+
+
+def _emit_sets(
+    outcome: BuildOutcome,
+    all_sources: Sequence[EngineSource],
+    files: Sequence[SourceFile],
+    changed: set[Path] | None,
+) -> tuple[set[str], list[EngineSource]]:
+    """`(files to emit, sources to resolve)` for this run (see the module docstring).
+
+    On a full run (`changed is None`) both cover everything the run read. On an incremental
+    run the sources to resolve are exactly the engine's rechecked set — the only modules whose
+    types the warm build populated — and the files to emit add the changed files, so a changed
+    file that stopped parsing (never an engine source, so never rechecked) is still re-emitted
+    as the skip it became and its stale graph evicted (D6 rule 1).
+    """
+    if changed is None:
+        # Every file handed in, including one whose bytes could not be read (it has no
+        # content hash, so `_fragments` emits no fragment for it, but its skip must still be
+        # kept and counted — FR-7).
+        return {source.relpath for source in files}, list(all_sources)
+    changed_relpaths = {source.relpath for source in files if source.path in changed}
+    emit_sources = list(outcome.rechecked_sources())
+    emit = {source.relpath for source in emit_sources} | changed_relpaths
+    return emit, emit_sources
 
 
 class PythonAdapter:
@@ -227,29 +304,39 @@ class PythonAdapter:
         cache_dir: Path,
         changed: set[Path] | None,
         progress: ProgressSink,
+        prior_nodes: Sequence[NodeRow] | None = None,
     ) -> AdapterResult:
         """Analyze `files`, returning schema-conformant fragments (design.md §3.4).
 
         `root` is not read: every path this adapter needs is already on the `SourceFile`s
         (absolute to open, root-relative to name), and the engine's own build roots are
         derived per file from package structure rather than from where the analysis root
-        happens to sit (`mypy_driver`'s trap 2). `changed` is accepted per the protocol and
-        not consumed: every call re-derives every file it is handed (see the module
-        docstring), so there is nothing an incremental hint could narrow yet.
+        happens to sit (`mypy_driver`'s trap 2). `changed` is the incremental switch (see the
+        module docstring): `None` selects a cold full re-derivation, and a set selects the
+        warm build whose re-extracted set is the engine's `rechecked_modules` unioned with the
+        changed files. `prior_nodes` seeds the `TargetIndex` for the files that build does not
+        re-read, whose cache-loaded ASTs the engine strips (see `_target_index`).
 
         Raises only `EngineError` — the whole build failing twice, once with a discarded
         cache (design.md §3.5). Every other failure is per-file and comes back as a
         `SkipRecord`.
         """
-        _discard_engine_cache(cache_dir)
+        if changed is None:
+            _discard_engine_cache(cache_dir)
 
         outcome = run_build(files, cache_dir, progress)
-        sources, extractions, no_tree = _extract_all(outcome, progress)
-        skipped = [*outcome.skipped, *no_tree]
-        resolutions, leaves = _resolve_all(outcome, sources, extractions, progress)
+        all_sources, extractions, no_tree = _extract_all(outcome, progress)
+
+        emit, emit_sources = _emit_sets(outcome, all_sources, files, changed)
+        # Skips belong to a re-extracted file only: an unchanged file's stale skip stays in
+        # the index untouched, so the diagnostics and the merge see this run's skips alone.
+        skipped = [record for record in (*outcome.skipped, *no_tree) if record.path in emit]
+        targets = _target_index(outcome, all_sources, extractions, emit, changed, prior_nodes)
+        resolutions, leaves = _resolve_all(outcome, emit_sources, extractions, targets, progress)
 
         diagnostics: list[Diag] = []
-        for relpath in sorted(extractions):
+        for source in emit_sources:
+            relpath = source.relpath
             diagnostics.extend(extractions[relpath].diagnostics)
             # `externals` *replaces* the resolution's diagnostics: a site it named is no
             # longer unresolved, so taking both would double-count the C-11 gap.
@@ -257,16 +344,17 @@ class PythonAdapter:
 
         # Built before the result, not inside it: `_fragments` completes `skipped` for any
         # file it finds unaccounted for, and that has to happen before the list is read.
-        fragments = _fragments(outcome, extractions, resolutions, leaves, skipped)
+        fragments = _fragments(outcome, extractions, resolutions, leaves, skipped, emit)
 
         return AdapterResult(
             fragments=fragments,
             skipped=sorted(skipped, key=lambda record: record.path),
-            diagnostics=diagnostics,
-            # The files whose graph this call re-derived. Every analyzed file, because
-            # every call is a full analysis (see the module docstring).
-            rechecked={source.path for source in sources},
+            diagnostics=sorted(diagnostics, key=lambda diag: (diag.path or "", diag.line or 0)),
+            # The files whose graph this call re-derived — every analyzed file on a full run,
+            # the rechecked-and-changed set on an incremental one (D6 rule 1).
+            rechecked={source.path for source in files if source.relpath in emit},
             engine_meta=dict(outcome.engine_meta),
+            cache_fallback=outcome.cache_fallback,
         )
 
 

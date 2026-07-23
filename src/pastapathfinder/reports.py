@@ -99,7 +99,16 @@ REANALYSIS_MODES: tuple[str, ...] = (
 )
 
 #: FR-35's three attributions, exhaustive: every re-processed file carries exactly one.
-REPROCESS_REASONS: tuple[str, ...] = ("content_changed", "dependent", "cache_fallback")
+#: `content_changed` — the file's own bytes moved; `dependent` — re-resolved only because a
+#: dependency did; `cache_fallback` — reprocessed by the AC-24.3 wipe-and-rebuild.
+REASON_CONTENT_CHANGED = "content_changed"
+REASON_DEPENDENT = "dependent"
+REASON_CACHE_FALLBACK = "cache_fallback"
+REPROCESS_REASONS: tuple[str, ...] = (
+    REASON_CONTENT_CHANGED,
+    REASON_DEPENDENT,
+    REASON_CACHE_FALLBACK,
+)
 
 #: FR-38's fixed `note`. The wording is load-bearing: the post-run check narrows the
 #: window in which a mid-run edit goes unnoticed and cannot close it, so the report must
@@ -551,7 +560,9 @@ def render_reanalysis(document: Mapping[str, Any]) -> str:
     if mode == MODE_SKIPPED_NO_CHANGES:
         return "Re-analysis: nothing changed — no files were re-processed."
     if mode == MODE_FULL:
-        lines = [f"Re-analysis: full analysis of {len(reprocessed)} files"]
+        # A full run re-derives the whole codebase; the per-file delta lives in
+        # coverage.json, so this states the mode rather than an incremental file count.
+        lines = ["Re-analysis: full analysis of the codebase."]
     else:
         lines = [f"Re-analysis ({mode}): {len(reprocessed)} files re-processed"]
     for row in reprocessed[:RENDER_LIMIT]:

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from pastapathfinder.progress import ProgressSink
-from pastapathfinder.schema import Diag, GraphFragment, SkipRecord
+from pastapathfinder.schema import Diag, GraphFragment, NodeRow, SkipRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +59,10 @@ class AdapterResult:
       this call re-derived. Consumed by `incremental.merge()` (task 4.1), which per D6
       rule 1 takes it from the engine's own rechecked-modules report and never infers it.
     * `engine_meta` — provenance for the index's `meta` table (`engine`, `engine_version`).
+    * `cache_fallback` — True when the engine's incremental cache was found unusable and the
+      adapter recovered by wiping it and rebuilding cold (AC-24.3). The runner then publishes
+      the run as a fallback and attributes every file `cache_fallback`, rather than the
+      incremental attributions a warm build would have earned (FR-35).
     """
 
     fragments: list[GraphFragment] = field(default_factory=list)
@@ -66,6 +70,7 @@ class AdapterResult:
     diagnostics: list[Diag] = field(default_factory=list)
     rechecked: set[Path] = field(default_factory=set)
     engine_meta: dict[str, Any] = field(default_factory=dict)
+    cache_fallback: bool = False
 
 
 @runtime_checkable
@@ -90,15 +95,23 @@ class LanguageAdapter(Protocol):
         cache_dir: Path,
         changed: set[Path] | None,
         progress: ProgressSink,
+        prior_nodes: Sequence[NodeRow] | None = None,
     ) -> AdapterResult:
         """Analyze `files` under `root`, returning schema-conformant fragments.
 
         `cache_dir` is a directory the adapter owns for its engine's incremental cache.
-        `changed` is the incremental hint — the files whose content changed since the
-        last run, or None on a full run; an adapter may narrow its work with it but must
-        still return a fragment for every file handed in. `progress` is the run's stderr
-        channel (FR-41): countable work advances it, an opaque engine call runs inside
-        `progress.heartbeat(...)`.
+        `changed` is the incremental hint — the files whose content changed since the last
+        run, or None on a full run. On a full run the adapter re-derives every file; on an
+        incremental one it narrows to the engine's re-extracted set and returns a fragment
+        only for each re-derived file (the merge preserves the rest).
+
+        `prior_nodes` is the existing index's nodes, supplied on an incremental run so the
+        adapter can resolve a call from a re-extracted file into one it did not re-read.
+        design.md §3.5's `TargetIndex` is built from "this run's extractions on a full run,
+        or the index's own rows where a file was not re-extracted": an incremental engine
+        strips the ASTs of cache-loaded modules, so their structure is no longer walkable
+        and must come from the index. `None` on a full run, where every target is freshly
+        extracted. `progress` is the run's stderr channel (FR-41).
         """
         ...
 
