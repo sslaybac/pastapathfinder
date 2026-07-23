@@ -33,8 +33,13 @@ The change gate (§3.6, D18): a run whose candidate hashes and packaging-metadat
 match the index re-parses nothing, leaves the index untouched, and reports
 `mode: skipped_no_changes` (AC-24.1). A merge that cannot be applied — a fragment fails
 validation — wipes the caches and falls back to a full analysis attributing every file
-`cache_fallback` (AC-24.3, AC-35.4), announced while it runs (AC-30.2). The post-run change
-check (task 4.2) still writes its report with empty lists here, per the C-10 convention.
+`cache_fallback` (AC-24.3, AC-35.4), announced while it runs (AC-30.2).
+
+The post-run change check (`postrun`, FR-38) closes the run: a `(size, mtime)` baseline is
+taken right after discovery, and once the index is finalized the check re-stats each
+recorded file and hash-confirms any difference, so `change_warning.json` names the files
+edited while the run was in progress (AC-38.1-38.3). The check is best-effort (EC-14) and
+runs on every path — full, incremental, no-change and fallback alike.
 """
 
 from __future__ import annotations
@@ -49,7 +54,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-from pastapathfinder import __version__, incremental, queries, reports
+from pastapathfinder import __version__, incremental, postrun, queries, reports
 from pastapathfinder.adapters.base import AdapterResult, LanguageAdapter, SourceFile, adapter_for
 from pastapathfinder.adapters.python import PythonAdapter
 from pastapathfinder.config import Config, load_config
@@ -478,6 +483,14 @@ def run_analysis(
     base_diagnostics = [*ruleset.diagnostics, *discovered.probe_diagnostics]
     meta_hash = incremental.metadata_hash(discovered.root)
 
+    # FR-38 pre-check baseline: the size/mtime of every enumerated file, taken before the
+    # engine reads a byte, so a file edited while the run is in progress shows a moved stat
+    # at completion. Enumerated files only (design.md §8-O1): pruned directories are not
+    # walked, hashed, or change-checked.
+    change_baseline = postrun.snapshot(
+        discovered.root, [discovered.relpath(path) for path in discovered.candidates]
+    )
+
     # `--full`, and the first analysis of a codebase, both take the full path; anything else
     # tries the incremental one, and an index we cannot read is not a usable base for it.
     prior = None if (first_run or full) else _open_prior(index_path)
@@ -511,7 +524,8 @@ def run_analysis(
             prior.close()
 
     run = run.finish(time.monotonic() - started)
-    documents = _documents(run, discovered, outcome)
+    change = _change_check(index_path, discovered.root, change_baseline)
+    documents = _documents(run, discovered, outcome, change)
     report_paths = {
         filename: reports.write_report(reports_dir, filename, document)
         for filename, document in documents.items()
@@ -842,8 +856,28 @@ def _skip_reasons(analysis: AdapterResult) -> dict[str, str]:
     return reasons
 
 
+def _change_check(
+    index_path: Path, root: Path, baseline: Mapping[str, postrun.FileState]
+) -> postrun.ChangeCheck:
+    """Run the FR-38 check against the finalized index's recorded content (design.md §3.10).
+
+    The recorded content is the index's `content_hash` per file — FR-24's authority for the
+    bytes as read — so the check opens the just-written index read-only, takes its hashes,
+    and compares them against disk through the `baseline` captured before analysis. This runs
+    once, after the index is finalized, for every run path; the index is guaranteed present
+    (a full write renamed one into place, an incremental run merged into the existing one, a
+    no-change run left the prior one untouched).
+    """
+    with open_index(index_path, read_only=True) as store:
+        recorded = store.content_hashes()
+    return postrun.check(root, baseline, recorded)
+
+
 def _documents(
-    run: reports.RunInfo, discovered: DiscoveryResult, outcome: _RunOutcome
+    run: reports.RunInfo,
+    discovered: DiscoveryResult,
+    outcome: _RunOutcome,
+    change: postrun.ChangeCheck,
 ) -> dict[str, dict[str, object]]:
     """Build all six §5.3 documents. The coverage document asserts AC-7.1 as it is built."""
     rows = [reports.analyzed_row(path) for path in outcome.analyzed]
@@ -869,7 +903,12 @@ def _documents(
             no_entry_points_warning=outcome.dead.no_entry_points_warning,
             unreachable=[group.as_json() for group in outcome.dead.unreachable],
         ),
-        reports.CHANGE_WARNING_REPORT: reports.change_warning_document(run),
+        reports.CHANGE_WARNING_REPORT: reports.change_warning_document(
+            run,
+            changed=change.changed,
+            removed=change.removed,
+            check_failures=change.check_failures,
+        ),
     }
 
 

@@ -235,7 +235,7 @@
     - AC-24.3/35.4/30.2 (failure): a corrupt cache or a fragment validation failure on merge wipes caches, runs a full analysis, attributes **every** file `cache_fallback` in the report, and informs the user a longer full run is underway — never silent, never serving corrupt results.
     - AC-30.1: re-analysis after ≤ 5 changed files completes within **30 s** on the reference machine. References: 13.2 s for the 5-file core-module change set (279 files affected) and 2.69 s for a leaf change (`FINDINGS-mypy.md` Q3, `FINDINGS-session5.md` Part 1), **plus ~2.0 s** for D18's full detector parse pass over Django's 908 files (`FINDINGS-harness.md` Q3) — so expect ~4.7 s leaf / ~15 s core against the 30 s bound. Formal benchmark assertion lands in task 4.4.
 
-- [ ] **Task 4.2 — `postrun.py`: post-run change detection**
+- [x] **Task 4.2 — `postrun.py`: post-run change detection**
   - **Deliverable:** The FR-38 check — mtime/size pre-check over enumerated files, hash confirmation of any difference, `change_warning.json` and the stdout warning with the fixed best-effort `note`.
   - **References:** design.md §3.10 (`postrun`), §5.3; requirements FR-38, EC-14.
   - **Dependencies:** 1.5 (report writer), 2.5 (real content hashes).
