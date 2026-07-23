@@ -259,9 +259,15 @@ def test_the_remaining_reports_are_produced_empty_on_a_clean_run(tree, out_dir):
     assert warning["changed"] == warning["removed"] == warning["check_failures"] == []
     assert warning["note"] == reports.CHANGE_WARNING_NOTE
 
+    # `deadcode.json` is no longer a placeholder: task 3.4 computes it on every run. With
+    # no entry point anywhere in this tree, every function is unreachable and the warning
+    # says why (AC-18.2, AC-19.3).
     deadcode = report(result, reports.DEADCODE_REPORT)
-    assert deadcode["unreachable"] == []
     assert deadcode["no_entry_points_warning"] is True
+    assert [group["file"] for group in deadcode["unreachable"]] == [
+        "pkg/__init__.py",
+        "pkg/app.py",
+    ]
 
 
 def test_detected_entry_points_clear_the_no_entry_points_warning(tree, out_dir):

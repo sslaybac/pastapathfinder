@@ -187,7 +187,7 @@
     - Django fixture — `path("x", views.foo)` and `path("y", FooView.as_view())` both resolved (AC-11.2); `unreferenced()` not flagged.
     - AC-11.3 (failure): the Django fixture's **loop-appended `reports/*` patterns** are the deliberate negative control — they must be recorded as `unresolved` diagnostics, **not silently missed**, and no fabricated route is emitted. Same for dynamic FastAPI `add_api_route` registration.
 
-- [ ] **Task 3.4 — `queries.py`: slices, reachability, dead code, and their run integration**
+- [x] **Task 3.4 — `queries.py`: slices, reachability, dead code, and their run integration**
   - **Deliverable:** `slice(index, node_id, direction, max_nodes=200)` as a SQLite recursive CTE over `kind='calls'` edges (forward `src→dst`, backward `dst→src`) in BFS order under a node budget, returning `SliceResult(nodes, edges, truncated, frontier)`; `reachability(index)` writing `reachable` during every analyze run; `dead_code(index)` producing the grouped unreachable set paired with `DEADCODE_CAVEAT`; `deadcode.json` populated by the runner.
   - **References:** design.md §3.9, §5.3, D5, D16, §8-O2; requirements FR-15, FR-16, FR-17, FR-18, FR-19, FR-28 (bound), EC-6, EC-9.
   - **Dependencies:** 3.1–3.3.

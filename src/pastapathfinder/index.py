@@ -39,6 +39,7 @@ from pastapathfinder.schema import (
     NodeRow,
     attrs_json,
     validate_fragment,
+    validate_rows,
 )
 
 #: The index's fixed name inside the output directory (design.md §5.1's `--out` tree).
@@ -254,6 +255,56 @@ class Index:
         ]
         with self.transaction():
             self._connection.executemany(_INSERT_FILE, rows)
+
+    def write_rows(self, nodes: Iterable[NodeRow], edges: Iterable[EdgeRow]) -> None:
+        """Validate and write rows that belong to no single file, canonically.
+
+        The write path for graph content a `GraphFragment` cannot express because it is
+        not one file's contribution: the entry-point nodes and their `calls` edges, which
+        a detector pass emits across the whole analyzed set and recomputes wholesale on
+        every proceeding run (D18). They pass the same gate and the same canonical sort as
+        everything else, so an entry edge to a target that is no longer in the index is
+        rejected rather than stored (AC-23.2), and two runs emitting the same entries in
+        different orders still produce identical bytes (FR-44).
+        """
+        node_rows = list(nodes)
+        edge_rows = list(edges)
+        known_ids = {node.id for node in node_rows} | self.node_ids()
+        validate_rows(node_rows, edge_rows, known_ids, context="entry-point rows")
+
+        with self.transaction():
+            self._connection.executemany(
+                _INSERT_NODE,
+                [
+                    (
+                        node.id,
+                        node.kind,
+                        node.name,
+                        node.language,
+                        node.file_path,
+                        node.start_line,
+                        node.end_line,
+                        node.is_external,
+                        node.reachable,
+                        attrs_json(node.attrs),
+                    )
+                    for node in canonical_nodes(node_rows)
+                ],
+            )
+            self._connection.executemany(
+                _INSERT_EDGE,
+                [
+                    (
+                        edge.src,
+                        edge.dst,
+                        edge.kind,
+                        edge.src_file,
+                        edge.is_ambiguous,
+                        attrs_json(edge.attrs),
+                    )
+                    for edge in canonical_edges(edge_rows)
+                ],
+            )
 
     def write_fragments(self, fragments: Iterable[GraphFragment]) -> None:
         """Validate a batch of fragments, then write it canonically.

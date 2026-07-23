@@ -1,8 +1,9 @@
 """Run orchestration: one `analyze` run, end to end (design.md §3.10 `runner`).
 
 design.md §1 (the data flow this module walks in order), §3.10, §3.4 (the adapter it
-drives), §5.1 (`--out` derivation), §5.3 (the reports it writes), D9, D17; requirements
-FR-5, FR-6, FR-7, FR-23, FR-34, FR-41, FR-42, FR-43.
+drives), §3.7 (the detector pass it runs), §3.9 (the reachability it triggers), §5.1
+(`--out` derivation), §5.3 (the reports it writes), D9, D17, D18, D19; requirements FR-5,
+FR-6, FR-7, FR-8, FR-9, FR-18, FR-19, FR-23, FR-34, FR-41, FR-42, FR-43.
 
 The order is design.md §1's and is not incidental:
 
@@ -10,19 +11,26 @@ The order is design.md §1's and is not incidental:
    run that cannot write its reports should cost nothing (AC-34.2, AC-7.3);
 2. compose the exclusion rules and walk the tree (`exclusions`, `discovery`);
 3. hand the surviving candidates to the language adapter (`adapters.base`);
-4. write the index atomically (`index.full_write`);
+4. write the index atomically (`index.full_write`), and inside that same write: run the
+   detectors over every analyzed file (D18) so entry points are in the index, then
+   compute reachability (D19) and read the dead-code findings out of it;
 5. write the six reports, then render each one *from the file just written* (D9);
 6. hand back a `RunResult` the CLI turns into an exit code (§3.1).
 
+Step 4's order is the load-bearing part: the detectors resolve their targets against node
+IDs the fragments just wrote, and reachability needs the entry-point nodes the detectors
+just emitted. All of it happens inside `full_write`, so the index this run publishes is
+either complete — graph, entry points and reachability together — or absent (EC-13).
+
 Steps this task does not own are visible in the shape but not built here: incremental
-planning and the re-analysis report's content (task 4.1), entry-point detection (3.1-3.3),
-reachability and dead code (3.4), and the post-run change check (4.2) all arrive later.
-Their reports are written now with empty lists, per the C-10 convention that an artifact
-is always produced even when it has nothing to say.
+planning and the re-analysis report's content (task 4.1) and the post-run change check
+(4.2) arrive later. Their reports are written now with empty lists, per the C-10
+convention that an artifact is always produced even when it has nothing to say.
 """
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import os
 import sys
@@ -32,13 +40,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
-from pastapathfinder import __version__, reports
+from pastapathfinder import __version__, queries, reports
 from pastapathfinder.adapters.base import AdapterResult, LanguageAdapter, SourceFile, adapter_for
 from pastapathfinder.adapters.python import PythonAdapter
 from pastapathfinder.config import Config, load_config
+from pastapathfinder.detectors.base import ModuleInput, ProjectInput
+from pastapathfinder.detectors.registry import run_detectors
 from pastapathfinder.discovery import PROBE_BYTES, DiscoveryResult, discover
 from pastapathfinder.exclusions import build_ruleset
-from pastapathfinder.index import INDEX_FILENAME, full_write
+from pastapathfinder.index import INDEX_FILENAME, Index, full_write
 from pastapathfinder.progress import ProgressSink
 from pastapathfinder.schema import Diag, GraphFragment, SkipRecord
 
@@ -59,9 +69,12 @@ DATA_SUBDIR = "pastapathfinder"
 DIGEST_LENGTH = 12
 
 #: The progress phases of a run (FR-41). Discovery's total is unknowable before the walk
-#: finishes, so it runs as an activity phase (AC-41.2).
+#: finishes, so it runs as an activity phase (AC-41.2), as does reachability — one bounded
+#: set of SQL statements with nothing per-file to count.
 PHASE_DISCOVERY = "discovering sources"
 PHASE_ANALYSIS = "analyzing"
+PHASE_DETECT = "detecting entry points"
+PHASE_REACHABILITY = "computing reachability"
 
 
 class RunnerError(Exception):
@@ -224,6 +237,70 @@ def _analyze(
 
 
 # ---------------------------------------------------------------------------
+# The detector pass (design.md §3.7, D18)
+# ---------------------------------------------------------------------------
+
+
+def _module_inputs(
+    root: Path, analyzed: Sequence[str], node_ids: frozenset[str], progress: ProgressSink
+) -> tuple[list[ModuleInput], list[Diag]]:
+    """Parse every analyzed file with stdlib `ast` and build the per-module inputs (D14).
+
+    The standard library's parser, not the engine's trees: that is what lets a detector see
+    a file the engine produced nothing usable for, and it is why a detector run is a pure
+    function of what it is handed (D18).
+
+    A file that cannot be read or parsed here contributes no input. It is not silently
+    dropped — an analyzed file the detector pass could not read is exactly the kind of
+    non-fatal anomaly the run's diagnostics exist to record (C-10) — and, as with any
+    detector failure, the pass continues over every other file (AC-8.2).
+    """
+    modules: list[ModuleInput] = []
+    diagnostics: list[Diag] = []
+    with progress.phase(PHASE_DETECT, total=len(analyzed)):
+        for relpath in analyzed:
+            try:
+                tree = ast.parse((root / relpath).read_bytes(), filename=relpath)
+            except (OSError, SyntaxError, ValueError) as exc:
+                diagnostics.append(
+                    Diag(
+                        kind="detector_error",
+                        path=relpath,
+                        message=(
+                            f"entry-point detection skipped {relpath}: the file could not be "
+                            f"parsed with the standard library parser ({exc})"
+                        ),
+                    )
+                )
+            else:
+                modules.append(ModuleInput.build(relpath, tree, node_ids))
+            progress.advance()
+    return modules, diagnostics
+
+
+def _detect_entry_points(
+    store: Index, root: Path, analyzed: Sequence[str], progress: ProgressSink
+) -> list[Diag]:
+    """Run every detector over the analyzed set and write what they emit (D18, FR-8-11).
+
+    Wholesale, over all analyzed files, on every proceeding run: detectors take no part in
+    the incremental evict-and-merge discipline (D18), so this pass is the same work on a
+    full run and on an incremental one, and the entry points in the index are always the
+    ones the current code declares.
+
+    Targets are resolved against the node IDs the fragments just wrote, which is why this
+    runs after `write_fragments()` and not beside it: a declaration naming a function that
+    is no longer in the graph must become an unresolved diagnostic (AC-10.2, AC-11.3), and
+    that judgement can only be made against a complete graph.
+    """
+    node_ids = frozenset(store.node_ids())
+    modules, diagnostics = _module_inputs(root, analyzed, node_ids, progress)
+    output = run_detectors(modules, ProjectInput.discover(root, node_ids))
+    store.write_rows(output.nodes, output.edges)
+    return [*diagnostics, *output.diagnostics]
+
+
+# ---------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------
 
@@ -306,9 +383,13 @@ def run_analysis(
     }
     with full_write(index_path, meta) as store:
         store.write_fragments(analysis.fragments)
+        diagnostics.extend(_detect_entry_points(store, discovered.root, analyzed, progress))
+        with progress.phase(PHASE_REACHABILITY):
+            queries.reachability(store)
+            dead = queries.dead_code(store)
 
     run = run.finish(time.monotonic() - started)
-    documents = _documents(run, discovered, analysis, counts, analyzed, skipped, diagnostics)
+    documents = _documents(run, discovered, counts, analyzed, skipped, diagnostics, dead)
     report_paths = {
         filename: reports.write_report(reports_dir, filename, document)
         for filename, document in documents.items()
@@ -353,30 +434,28 @@ def _skip_reasons(analysis: AdapterResult) -> dict[str, str]:
 def _documents(
     run: reports.RunInfo,
     discovered: DiscoveryResult,
-    analysis: AdapterResult,
     counts: dict[str, int],
     analyzed: Sequence[str],
     skipped: Mapping[str, str],
     diagnostics: Sequence[Diag],
+    dead: queries.DeadCodeResult,
 ) -> dict[str, dict[str, object]]:
     """Build all six §5.3 documents. The coverage document asserts AC-7.1 as it is built."""
     rows = [reports.analyzed_row(path) for path in analyzed]
     rows += [reports.skipped_row(path, reason) for path, reason in skipped.items()]
     rows += [reports.excluded_row(record) for record in discovered.excluded]
 
-    # No detector has run yet (tasks 3.1-3.3), so a run's entry points are whatever the
-    # adapter emitted — none in practice. The warning states the fact rather than
-    # asserting a reachability result this task does not compute.
-    has_entry_points = any(
-        node.kind == "entry_point" for fragment in analysis.fragments for node in fragment.nodes
-    )
     return {
         reports.COVERAGE_REPORT: reports.coverage_document(run, counts, rows),
         reports.EXCLUSIONS_REPORT: reports.exclusions_document(run, discovered.excluded),
         reports.REANALYSIS_REPORT: reports.reanalysis_document(run, mode=reports.MODE_FULL),
         reports.DIAGNOSTICS_REPORT: reports.diagnostics_document(run, diagnostics),
+        # AC-19.3: the warning travels with the findings, so a run with no entry points
+        # cannot present a codebase-wide list as though it meant something.
         reports.DEADCODE_REPORT: reports.deadcode_document(
-            run, no_entry_points_warning=not has_entry_points
+            run,
+            no_entry_points_warning=dead.no_entry_points_warning,
+            unreachable=[group.as_json() for group in dead.unreachable],
         ),
         reports.CHANGE_WARNING_REPORT: reports.change_warning_document(run),
     }

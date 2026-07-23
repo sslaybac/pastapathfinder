@@ -441,6 +441,30 @@ def _validate_edge(edge: object, known_ids: Container[str], context: str) -> Non
             _reject(context, f"edge {field_name} {value!r} is not a known node", edge)
 
 
+def validate_rows(
+    nodes: Iterable[object],
+    edges: Iterable[object],
+    known_ids: Container[str] = frozenset(),
+    context: str = "rows",
+) -> None:
+    """Reject any node or edge that does not conform to §4.2, naming the offending row.
+
+    The row-level half of `validate_fragment()`, exposed because not every set of rows
+    belongs to one file: the entry-point nodes a detector pass emits span the analyzed set
+    (D18), and a project-level detector's nodes belong to no source file at all. They face
+    the same gate all the same — an entry node with a malformed ID, or an edge to a target
+    that vanished since the last run, is rejected here rather than stored (AC-22.2,
+    AC-23.2).
+    """
+    node_rows = list(nodes)
+    for node in node_rows:
+        _validate_node(node, context)
+    local_ids = {node.id for node in node_rows if isinstance(node, NodeRow)}
+    reachable_ids = _EitherContainer(local_ids, known_ids)
+    for edge in edges:
+        _validate_edge(edge, reachable_ids, context)
+
+
 def validate_fragment(fragment: object, known_ids: Container[str] = frozenset()) -> None:
     """Reject a fragment that does not conform to §4.2, naming the offending row.
 
@@ -457,9 +481,4 @@ def validate_fragment(fragment: object, known_ids: Container[str] = frozenset())
     path = fragment.file.path if isinstance(fragment.file, FileRecord) else "<unknown file>"
     context = f"fragment for {path!r}"
     _validate_file(fragment.file, context)
-    for node in fragment.nodes:
-        _validate_node(node, context)
-    local_ids = {node.id for node in fragment.nodes if isinstance(node, NodeRow)}
-    reachable_ids = _EitherContainer(local_ids, known_ids)
-    for edge in fragment.edges:
-        _validate_edge(edge, reachable_ids, context)
+    validate_rows(fragment.nodes, fragment.edges, known_ids, context)
