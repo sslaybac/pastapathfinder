@@ -177,7 +177,7 @@
     - FR-13: `setup.py` is **parsed, never executed** — a fixture whose `setup.py` writes a witness file on execution leaves no witness; a computed (non-literal) `entry_points` value is recorded unresolved rather than evaluated.
     - Bare scripts with neither a `__main__` guard nor a packaging declaration are **out of v1 scope** (backlog B-20) — a fixture asserts none is detected.
 
-- [ ] **Task 3.3 — `detectors/flask_fastapi.py` + `detectors/django_urlconf.py`: web-framework routes**
+- [x] **Task 3.3 — `detectors/flask_fastapi.py` + `detectors/django_urlconf.py`: web-framework routes**
   - **Deliverable:** Both route detectors per design.md §3.7's normative rules, including `attrs.route` population and the Django URLconf's import-table-driven view resolution (`Name`/`Attribute` → function node, `X.as_view()` → class node, `include("mod")` → recurse).
   - **References:** design.md §3.7, §4.2 (`attrs` vocabulary), D18; requirements FR-11.
   - **Dependencies:** 3.1. (The import table comes from the detector's own stdlib AST per D18 — **not** from `externals.py`, whose tables exist only for re-extracted modules.)

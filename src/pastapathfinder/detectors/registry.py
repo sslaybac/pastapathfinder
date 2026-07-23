@@ -5,11 +5,11 @@ discovery/registration machinery), D18 (detectors run wholesale over all analyze
 on every proceeding run and hold no cross-run state); requirements FR-8 (AC-8.1, AC-8.2),
 FR-9.
 
-`DETECTORS` is the ordered list of design.md §3.7. It holds only detectors whose task has
-run: `MainBlockDetector` and `ConsoleScriptsDetector` today; task 3.3 appends the two route
-detectors. That is the whole registration mechanism — appending one entry — so
-adding a detector touches one new module plus this one line and nothing else (AC-8.1); the
-core schema is never edited to add a detector.
+`DETECTORS` is the ordered list of design.md §3.7, now complete: `MainBlockDetector`,
+`ConsoleScriptsDetector`, `FlaskFastapiRouteDetector`, `DjangoUrlconfDetector`. That is the
+whole registration mechanism — appending one entry — so adding a detector touches one new
+module plus this one line and nothing else (AC-8.1); the core schema is never edited to add
+a detector.
 
 `run_detectors()` is a pure function of the module trees and the metadata file set it is
 handed (D18): it derives nothing from adapter state and reads no cross-run cache, so a run
@@ -37,11 +37,18 @@ from pastapathfinder.detectors.base import (
     ProjectInput,
 )
 from pastapathfinder.detectors.console_scripts import ConsoleScriptsDetector
+from pastapathfinder.detectors.django_urlconf import DjangoUrlconfDetector
+from pastapathfinder.detectors.flask_fastapi import FlaskFastapiRouteDetector
 from pastapathfinder.detectors.main_block import MainBlockDetector
 from pastapathfinder.schema import Diag, EdgeRow, NodeRow
 
 #: The ordered detector list of design.md §3.7. Extended by one entry per detector task.
-DETECTORS: tuple[Detector, ...] = (MainBlockDetector(), ConsoleScriptsDetector())
+DETECTORS: tuple[Detector, ...] = (
+    MainBlockDetector(),
+    ConsoleScriptsDetector(),
+    FlaskFastapiRouteDetector(),
+    DjangoUrlconfDetector(),
+)
 
 
 def _run_module(detector: ModuleDetector, module: ModuleInput) -> DetectorOutput:

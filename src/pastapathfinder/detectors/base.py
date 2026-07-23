@@ -33,7 +33,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pastapathfinder.adapters.python.normalize import module_name
+from pastapathfinder.adapters.python.normalize import code_node_id, module_name
 from pastapathfinder.schema import DETECTORS, LANGUAGE_PYTHON, Diag, EdgeRow, NodeRow
 
 #: §4.2's reserved `attrs` key naming the detector that emitted an entry node.
@@ -128,19 +128,33 @@ def import_table(tree: ast.Module, module: str, in_package: bool) -> dict[str, s
 
 @dataclass(frozen=True, slots=True)
 class ModuleInput:
-    """What a per-module detector reads: one analyzed file's stdlib AST (design.md §3.7)."""
+    """What a per-module detector reads: one analyzed file's stdlib AST (design.md §3.7).
+
+    `node_ids` is the same resolution target `ProjectInput` carries, for the same reason:
+    §3.7 has the route detectors resolve a recognized site to a *node* (`Name/Attribute` →
+    function node, `X.as_view()` → the class node), and only the run's node IDs can turn the
+    qualname the import table yields into one. Emitting an edge to an unverified ID instead
+    would fabricate — a deleted view would make a one-line edit a fragment-validation failure
+    (AC-23.2) where D18 promises an AC-11.3 unresolved diagnostic. The default is empty,
+    which resolves nothing: a detector handed no graph reports every route unresolved rather
+    than inventing targets, which is the honest answer and matches `ProjectInput.node_ids`.
+    """
 
     module_path: str  # root-relative POSIX relpath
     tree: ast.Module  # a stdlib `ast` parse — never a mypy tree (D14)
     import_table: Mapping[str, str]  # `{bound name: qualified name}`, from `tree` (D18)
+    node_ids: frozenset[str] = frozenset()  # index code-node IDs, the resolution target
 
     @classmethod
-    def build(cls, module_path: str, tree: ast.Module) -> ModuleInput:
+    def build(
+        cls, module_path: str, tree: ast.Module, node_ids: frozenset[str] = frozenset()
+    ) -> ModuleInput:
         """Assemble the input, deriving the import table from `tree` alone (D18)."""
         return cls(
             module_path=module_path,
             tree=tree,
             import_table=import_table(tree, module_name(module_path), is_package(module_path)),
+            node_ids=node_ids,
         )
 
 
@@ -218,6 +232,34 @@ class ProjectDetector(Detector):
 # ---------------------------------------------------------------------------
 # Entry-node emission (the one thing every detector shares)
 # ---------------------------------------------------------------------------
+
+
+def resolve_target(qualname: str, node_ids: frozenset[str]) -> tuple[str | None, bool]:
+    """`(node_id, ambiguous)` for `qualname` against the run's node IDs (§3.7 resolution).
+
+    A qualname names a node only if the run actually built one for it, so the answer comes
+    from the ID set rather than from string construction: `None` means "no such node", which
+    every caller turns into an unresolved diagnostic (AC-11.3, AC-10.2) rather than an edge
+    to a node that does not exist (AC-23.2).
+
+    §4.1 suffixes a code node's ID with `@start_line` when a qualname names several
+    definitions in one file, so a miss on the bare form is retried against those variants.
+    More than one variant is a genuine ambiguity — the declaration names a qualname, not a
+    line — so the lowest-line variant is taken and the edge is flagged `is_ambiguous=1`
+    (FR-40's posture: over-approximate visibly, never silently pick).
+    """
+    exact = code_node_id(qualname)
+    if exact in node_ids:
+        return exact, False
+    prefix = f"{exact}@"
+    lines = sorted(
+        int(node_id[len(prefix) :])
+        for node_id in node_ids
+        if node_id.startswith(prefix) and node_id[len(prefix) :].isdigit()
+    )
+    if not lines:
+        return None, False
+    return f"{prefix}{lines[0]}", len(lines) > 1
 
 
 def entry_node_id(detector: str, qualname: str, line: int) -> str:
