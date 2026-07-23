@@ -204,7 +204,7 @@
     - AC-19.1/19.2: unreachable functions appear grouped by file, and every rendering carries `DEADCODE_CAVEAT` verbatim (a test asserts the caveat string is present in both the JSON and the stdout rendering). Per D16, `dead_code()` selects `kind='function'` only — a test asserts no `module` node ever appears in `deadcode.json`, while `reachable` is still written on module nodes in the index.
     - Determinism: repeated slice calls return identical node/edge ordering.
 
-- [ ] **Task 3.5 — `query` CLI subcommands**
+- [x] **Task 3.5 — `query` CLI subcommands**
   - **Deliverable:** `query entry-points`, `query slice --from NODE_ID --direction {forward,backward} [--max-nodes N]`, `query node NODE_ID`, `query dead-code`, each with `[--out DIR] [--json]`, where `--json` emits the same structured shapes as the design.md §5.2 HTTP API.
   - **References:** design.md §3.1, §5.1, §5.2; requirements FR-20, FR-15–19, FR-43.
   - **Dependencies:** 3.4.

@@ -73,10 +73,10 @@ def test_usage_errors_raise_systemexit_from_main():
 def test_handler_exception_maps_to_failure_with_one_line():
     """AC-43.3: an exception escaping a handler exits 2 with a one-line message.
 
-    `query entry-points` is the live example: its handler still raises until task 3.5
-    fills it in, which is exactly the escaped exception the D10 trap must map.
+    `view` is the live example: its handler still raises until task 5.1 fills it in, which
+    is exactly the escaped exception the D10 trap must map.
     """
-    result = run_cli("query", "entry-points")
+    result = run_cli("view")
     assert result.returncode == cli.EXIT_FAILURE
     lines = result.stderr.strip().splitlines()
     assert len(lines) == 1
@@ -85,7 +85,7 @@ def test_handler_exception_maps_to_failure_with_one_line():
 
 
 def test_handler_exception_prints_traceback_only_under_debug():
-    result = run_cli("query", "entry-points", "--debug")
+    result = run_cli("view", "--debug")
     assert result.returncode == cli.EXIT_FAILURE
     assert result.stderr.startswith("pastapathfinder: error: ")
     assert TRACEBACK_MARKER in result.stderr

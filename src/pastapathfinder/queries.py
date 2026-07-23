@@ -1,15 +1,24 @@
 """Slices, reachability, and dead code — the flagship queries (design.md §3.9).
 
-design.md §3.9 (`queries`, normative), §4.2 (the tables read), §5.3 (`deadcode.json`'s
-shape), D5 (recursive CTEs), D12 (determinism), D16 (the sliceable kinds and the
-`function`-only dead-code report), D19 (derived reachability), §8-O2 (the provisional
-slice bound); requirements FR-15 (AC-15.1/15.2), FR-16 (AC-16.1/16.2), FR-17
-(AC-17.1/17.2), FR-18 (AC-18.1/18.2), FR-19 (AC-19.1-19.3), FR-28 (AC-28.2), FR-36
-(AC-36.3), EC-6, EC-9.
+design.md §3.9 (`queries`, normative), §4.2 (the tables read), §5.2 (the wire shapes both
+surfaces emit), §5.3 (`deadcode.json`'s shape), D5 (recursive CTEs), D12 (determinism),
+D16 (the sliceable kinds and the `function`-only dead-code report), D19 (derived
+reachability), D20 (dead code recomputed from the index, never read from a report file),
+§8-O2 (the provisional slice bound); requirements FR-15 (AC-15.1/15.2), FR-16
+(AC-16.1/16.2), FR-17 (AC-17.1/17.2), FR-18 (AC-18.1/18.2), FR-19 (AC-19.1-19.3), FR-20
+(AC-20.1/20.2), FR-28 (AC-28.2), FR-36 (AC-36.3), EC-6, EC-9.
 
 Everything here answers from the index alone (AC-20.1): no engine, no source tree, no
 report file. One code path serves both surfaces — `query` on the CLI (task 3.5) and the
 viewer's HTTP API (task 5.1) — which is what keeps the two from drifting.
+
+**The serialization lives here for the same reason the queries do.** design.md §5.2 fixes
+one set of JSON shapes and §5.1 has `--json` emit "the same structured shapes as the HTTP
+API"; two renderings of one shape would drift the first time a field moved. So the
+`*_json()` functions below are the single producer, and both surfaces are thin: the CLI
+prints what they return, the server (task 5.1) serves it. They live in this module rather
+than in `cli` because the viewer may import neither `adapters` nor anything that reaches
+the engine (AC-25.1), and `cli` reaches `runner` and through it the adapter.
 
 **Reachability is one edge kind.** The BFS follows `calls` and nothing else: `imports`
 edges say a file was imported, not that anything in it ran, and `contains` edges are
@@ -32,7 +41,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from pastapathfinder.index import Index
+from pastapathfinder.index import Index, IndexIncompatibleError, IndexStoreError
+from pastapathfinder.reports import FORMAT_VERSION
 from pastapathfinder.schema import DEADCODE_CAVEAT, EdgeRow, NodeRow
 
 # ---------------------------------------------------------------------------
@@ -67,6 +77,12 @@ _NODE_COLUMNS = (
 
 #: Columns of `edges`, likewise.
 _EDGE_COLUMNS = "src, dst, kind, src_file, is_ambiguous, attrs"
+
+#: §4.2's reserved `attrs` key naming the detector that emitted an entry node. Spelled
+#: here rather than imported from `detectors.base`, which reaches `adapters.python` for the
+#: ID grammar and would therefore pull the engine into the import graph of every consumer
+#: of this module — including the viewer, which may reach neither (AC-25.1).
+ATTR_DETECTOR = "detector"
 
 #: SQLite's parameter ceiling is generous but finite, and `max_nodes` is caller-supplied;
 #: id lists are therefore bound in chunks rather than in one statement.
@@ -114,6 +130,40 @@ class NotSliceableError(QueryError):
         )
 
 
+#: design.md §5.2's error vocabulary, exhaustive. Both surfaces classify a failed query
+#: with `error_code()` below, so a consumer can branch on the code rather than on prose.
+ERROR_UNKNOWN_NODE = "unknown_node"
+ERROR_NOT_SLICEABLE = "not_sliceable"
+ERROR_INDEX_MISSING = "index_missing"
+ERROR_INDEX_INCOMPATIBLE = "index_incompatible"
+ERROR_CODES: tuple[str, ...] = (
+    ERROR_UNKNOWN_NODE,
+    ERROR_NOT_SLICEABLE,
+    ERROR_INDEX_MISSING,
+    ERROR_INDEX_INCOMPATIBLE,
+)
+
+
+def error_code(exc: Exception) -> str:
+    """The §5.2 code for a failed query.
+
+    The four codes are the whole vocabulary §5.2 defines, so the mapping is total by
+    construction: `IndexIncompatibleError` is the versioned refusal (AC-39.2, EC-13) and
+    every other store failure — absent, or present but not openable — is `index_missing`,
+    which is what it means to a consumer: there is no index here to answer from. The
+    distinction survives in the message, which always names the path and the reason.
+    """
+    if isinstance(exc, NotSliceableError):
+        return ERROR_NOT_SLICEABLE
+    if isinstance(exc, UnknownNodeError):
+        return ERROR_UNKNOWN_NODE
+    if isinstance(exc, IndexIncompatibleError):
+        return ERROR_INDEX_INCOMPATIBLE
+    if isinstance(exc, IndexStoreError):
+        return ERROR_INDEX_MISSING
+    raise ValueError(f"{type(exc).__name__} is not a §5.2 query failure: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # Result shapes
 # ---------------------------------------------------------------------------
@@ -134,6 +184,25 @@ class SliceResult:
     edges: list[EdgeRow] = field(default_factory=list)
     truncated: bool = False
     frontier: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class EntryPoint:
+    """One detected entry point, in the fields design.md §5.2 publishes for it.
+
+    `target_id` is the node the entry drives, read from its single outgoing `calls` edge
+    (§3.7) rather than from `attrs`: the edge is what reachability traverses, so listing
+    the edge's target is listing what the entry actually reaches. It is `None` only for an
+    entry whose edge is missing — which fragment validation rejects at the write boundary
+    (AC-23.2), so it stands for a corrupt index rather than a supported state.
+    """
+
+    id: str
+    name: str
+    detector: str
+    target_id: str | None = None
+    file_path: str | None = None
+    start_line: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +333,48 @@ def node(index: Index, node_id: str) -> NodeRow:
     if found is None:
         raise UnknownNodeError(node_id)
     return found
+
+
+# ---------------------------------------------------------------------------
+# Entry points (FR-8; the §5.2 listing)
+# ---------------------------------------------------------------------------
+
+#: Every entry node with the target of its `calls` edge, ordered by id (§5.2's "sorted by
+#: id"). The subquery takes the lowest target id, so an index that somehow held two edges
+#: for one entry still answers deterministically rather than by query plan.
+_ENTRY_POINTS = """
+    SELECT n.id, n.name, n.file_path, n.start_line, n.attrs,
+           (SELECT MIN(e.dst) FROM edges e WHERE e.src = n.id AND e.kind = 'calls')
+      FROM nodes n
+     WHERE n.kind = 'entry_point'
+     ORDER BY n.id
+"""
+
+
+def entry_points(index: Index) -> list[EntryPoint]:
+    """Every detected entry point in the index, sorted by id (FR-8, FR-20).
+
+    The read behind `query entry-points` and `/api/entry-points`. Detection itself happened
+    during `analyze` (design.md §3.7, D18); this is the index answering afterwards, with no
+    engine and no source tree in reach (AC-20.1).
+
+    Zero entry points is an answer, not a failure: EC-9 makes it the *expected* outcome for
+    a library, whose entry points are its public API. Every caller says so explicitly rather
+    than showing an empty list (AC-26.2's CLI counterpart).
+    """
+    return [
+        EntryPoint(
+            id=str(identifier),
+            name=str(name),
+            detector=str(_attrs(attrs).get(ATTR_DETECTOR, "")),
+            target_id=None if target is None else str(target),
+            file_path=None if file_path is None else str(file_path),
+            start_line=None if start_line is None else int(start_line),
+        )
+        for identifier, name, file_path, start_line, attrs, target in index.connection.execute(
+            _ENTRY_POINTS
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -507,9 +618,98 @@ def dead_code(index: Index) -> DeadCodeResult:
     )
 
 
+# ---------------------------------------------------------------------------
+# Wire shapes (design.md §5.2, normative)
+# ---------------------------------------------------------------------------
+#
+# One producer per shape, consumed by `cli`'s `--json` and by the viewer's HTTP API. The
+# field sets below are §5.2's, literally: a slice edge publishes `src`, `dst` and
+# `is_ambiguous` and not the columns behind them, because the API is the contract and the
+# schema is an implementation detail (design.md R2 calls the §5.2 surface stable while the
+# frontend iterates).
+
+
+def node_json(row: NodeRow) -> dict[str, Any]:
+    """`/api/nodes/{id}`'s shape for one node (§5.2)."""
+    return {
+        "id": row.id,
+        "kind": row.kind,
+        "name": row.name,
+        "file_path": row.file_path,
+        "start_line": row.start_line,
+        "end_line": row.end_line,
+        "is_external": row.is_external,
+        "reachable": row.reachable,
+        "attrs": dict(row.attrs),
+    }
+
+
+def entry_points_json(entries: Sequence[EntryPoint]) -> dict[str, Any]:
+    """`/api/entry-points`'s shape (§5.2). Order is `entry_points()`'s: by id."""
+    return {
+        "entry_points": [
+            {
+                "id": entry.id,
+                "name": entry.name,
+                "detector": entry.detector,
+                "target_id": entry.target_id,
+                "file_path": entry.file_path,
+                "start_line": entry.start_line,
+            }
+            for entry in entries
+        ]
+    }
+
+
+def slice_json(result: SliceResult) -> dict[str, Any]:
+    """`/api/slice`'s shape (§5.2), including AC-28.2's visible bound."""
+    return {
+        "nodes": [node_json(row) for row in result.nodes],
+        "edges": [
+            {"src": edge.src, "dst": edge.dst, "is_ambiguous": edge.is_ambiguous}
+            for edge in result.edges
+        ],
+        "truncated": result.truncated,
+        "frontier": list(result.frontier),
+    }
+
+
+def dead_code_json(result: DeadCodeResult) -> dict[str, Any]:
+    """`deadcode.json`'s shape minus the volatile `run*` block (D20, §5.3, §5.4).
+
+    D20 fixed this as *the* dead-code payload for both surfaces: recomputed from the index
+    via `dead_code()`, never read back from the report file, so a query answers correctly
+    against an index whose `<out>/reports/` directory is absent. `format_version` rides
+    along because it is part of the shape a consumer must be able to refuse (AC-42.4), and
+    the caveat rides along because AC-19.2 admits no rendering without it.
+    """
+    return {
+        "format_version": FORMAT_VERSION,
+        "caveat": result.caveat,
+        "no_entry_points_warning": result.no_entry_points_warning,
+        "unreachable": [group.as_json() for group in result.unreachable],
+    }
+
+
+def error_json(exc: Exception) -> dict[str, Any]:
+    """§5.2's error body: `{error: {code, message}}`.
+
+    The message is the exception's own text, which every one of these classes writes to
+    name the thing that went wrong and what to do about it (AC-16.2, AC-17.2, AC-20.2,
+    AC-39.2) — so the structured form says exactly what the one-line stderr form says.
+    """
+    return {"error": {"code": error_code(exc), "message": str(exc)}}
+
+
 __all__ = [
+    "ATTR_DETECTOR",
     "BACKWARD",
     "DIRECTIONS",
+    "ERROR_CODES",
+    "ERROR_INDEX_INCOMPATIBLE",
+    "ERROR_INDEX_MISSING",
+    "ERROR_NOT_SLICEABLE",
+    "ERROR_UNKNOWN_NODE",
     "FORWARD",
     "REACHABLE_KINDS",
     "SLICEABLE_KINDS",
@@ -517,13 +717,21 @@ __all__ = [
     "DeadCodeFunction",
     "DeadCodeGroup",
     "DeadCodeResult",
+    "EntryPoint",
     "NotSliceableError",
     "QueryError",
     "ReachabilityResult",
     "SliceResult",
     "UnknownNodeError",
     "dead_code",
+    "dead_code_json",
+    "entry_points",
+    "entry_points_json",
+    "error_code",
+    "error_json",
     "node",
+    "node_json",
     "reachability",
     "slice",
+    "slice_json",
 ]

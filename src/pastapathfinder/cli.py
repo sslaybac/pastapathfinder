@@ -1,22 +1,37 @@
 """Command-line entry point: argument parsing, exception trapping, exit codes.
 
-design.md §3.1 (responsibility and interface), §5.1 (the CLI surface), D10 (exit codes).
-Satisfies FR-43 (AC-43.1-3) and FR-32's console script.
+design.md §3.1 (responsibility and interface), §5.1 (the CLI surface), §5.2 (the shapes
+`--json` emits), D10 (exit codes), D20 (dead code recomputed from the index); requirements
+FR-32, FR-43 (AC-43.1-3), FR-20 (AC-20.1/20.2), FR-15-FR-19 (the query surface), FR-39
+(AC-39.2).
 
 The subcommand *behavior* lands with the components behind it: `analyze` is wired to
-`runner` here, the `query` subcommands arrive in task 3.5, `view` in task 5.1. This
-module owns the parsing, the top-level exception trap, and the exit-code computation.
+`runner`, the four `query` subcommands to `queries`, and `view` to `viewer.server` in task
+5.1. This module owns the parsing, the top-level exception trap, the exit-code
+computation, and the human renderings of the query answers.
+
+**A query touches the index and nothing else** (AC-20.1). It does not walk the tree, read a
+report, or start an engine: `analyze` wrote everything a query needs, which is what makes
+the answers survive a source tree that has since moved or gone. `--json` prints the §5.2
+shapes verbatim from `queries`' own serializers, so the CLI and the viewer's API cannot
+drift apart; the default rendering is the same data for a human.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import sqlite3
 import sys
 import traceback
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
-from pastapathfinder import __version__, runner
+from pastapathfinder import __version__, queries, reports, runner
+from pastapathfinder.config import load_config
+from pastapathfinder.index import INDEX_FILENAME, Index, IndexStoreError, open_index
+from pastapathfinder.schema import NodeRow
 
 # D10: three mutually distinct exit codes (FR-43). argparse exits 2 natively on
 # usage errors, which places them in the failure category by construction; Python's
@@ -182,20 +197,207 @@ def _handle_analyze(args: argparse.Namespace) -> int:
     return exit_code_for(result)
 
 
+# ---------------------------------------------------------------------------
+# The query subcommands (design.md §5.1; FR-15-FR-20)
+# ---------------------------------------------------------------------------
+
+
+def query_out_dir(requested: Path | str | None) -> Path:
+    """Where a query looks for the index: `--out`, else §5.1's derived location.
+
+    `analyze` derives its output directory from the root it was given; a query is given no
+    root, so the root is the current working directory — the codebase the user is standing
+    in. That makes `pastapathfinder analyze .` and a later `pastapathfinder query …` from
+    the same directory agree without either naming a path, and it is the only reading
+    available: §5.1's derivation takes a codebase path and a query has exactly one.
+
+    The configuration is consulted for the same reason: a codebase whose
+    `.pastapathfinder.toml` redirects `[output] dir` was analyzed *there*, so that is where
+    its index is. `--out` skips the lookup entirely — an explicit path is the answer, and a
+    config file the user never mentioned should not be able to fail their query.
+    """
+    if requested is not None:
+        return Path(requested).expanduser().resolve()
+    root = Path.cwd().resolve()
+    return runner.resolve_out_dir(root, None, load_config(root))
+
+
+def open_query_index(requested: Path | str | None) -> Index:
+    """Open the index a query answers from, read-only (AC-20.1, AC-20.2, AC-39.2).
+
+    Read-only because a query is a read: nothing here may modify what `analyze` published.
+
+    `index.open_index` already refuses an absent index and a version this build does not
+    support, both by name. The one gap it leaves is a file that exists and cannot be opened
+    at all — permissions, a broken mount — which SQLite reports without mentioning the
+    index or what to do next; AC-20.2 wants both, so it is restated here.
+    """
+    path = query_out_dir(requested) / INDEX_FILENAME
+    try:
+        return open_index(path, read_only=True)
+    except sqlite3.Error as exc:
+        raise IndexStoreError(
+            f"cannot open the index {path}: {exc}; check that it is readable, "
+            f"or re-run `pastapathfinder analyze <root>` to rebuild it"
+        ) from exc
+
+
+def _print_json(payload: dict[str, Any]) -> None:
+    """Emit one §5.2 document on stdout, formatted as the reports are (sorted, indented)."""
+    print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def _answer(
+    args: argparse.Namespace, produce: Callable[[Index], tuple[dict[str, Any], str]]
+) -> int:
+    """Open the index, run one query, and emit its answer in the requested form.
+
+    Failures are re-raised after the structured body is written, so `main()`'s trap keeps
+    its side of D10 — one line on stderr, the traceback only under `--debug`, exit 2 — while
+    an agent that asked for `--json` still receives the §5.2 error body on stdout instead
+    of having to parse the prose.
+    """
+    try:
+        with open_query_index(args.out) as index:
+            payload, text = produce(index)
+    except (queries.QueryError, IndexStoreError) as exc:
+        if args.json:
+            _print_json(queries.error_json(exc))
+        raise
+    if args.json:
+        _print_json(payload)
+    else:
+        print(text)
+    return EXIT_SUCCESS
+
+
+def _location(file_path: str | None, start_line: int | None, end_line: int | None) -> str:
+    """`path:start-end` for a node with a span, or what is known when it has none.
+
+    An external leaf says so rather than showing a blank location: FR-36 stops at the
+    boundary deliberately, and AC-37.2 leaves it without a file. A missing span on an
+    internal node is AC-37.3's recorded omission, not an error.
+    """
+    if file_path is None:
+        return "external — not analyzed"
+    if start_line is None:
+        return file_path
+    if end_line is None or end_line == start_line:
+        return f"{file_path}:{start_line}"
+    return f"{file_path}:{start_line}-{end_line}"
+
+
+def render_entry_points(entries: Sequence[queries.EntryPoint]) -> str:
+    """The human form of `query entry-points` (FR-8's listing).
+
+    Zero is a statement, never an empty list: EC-9 makes it the expected outcome for a
+    library, and the user needs to know that FR-17 lets them slice from any function
+    anyway — the same alternative AC-26.2 requires the viewer to offer.
+    """
+    if not entries:
+        return (
+            "Entry points: none detected.\n"
+            "  This is expected for a library, whose entry points are its public API.\n"
+            "  Slice from any function instead: "
+            "pastapathfinder query slice --from NODE_ID --direction forward"
+        )
+    lines = [f"Entry points: {len(entries)}"]
+    for entry in entries:
+        lines.append(f"  {entry.id}")
+        lines.append(
+            f"    {entry.detector} at {_location(entry.file_path, entry.start_line, None)}"
+            f" → {entry.target_id or 'no target'}"
+        )
+    return "\n".join(lines)
+
+
+def render_node(row: NodeRow) -> str:
+    """The human form of `query node` — the node panel's fields (§5.2, AC-27.3)."""
+    lines = [
+        row.id,
+        f"  kind: {row.kind}",
+        f"  name: {row.name}",
+        f"  location: {_location(row.file_path, row.start_line, row.end_line)}",
+    ]
+    if row.reachable is not None:
+        # NULL means the kind carries no reachability at all (§4.2), which is not the same
+        # claim as "not reachable" and must not be printed as one.
+        lines.append(f"  reachable from an entry point: {'yes' if row.reachable else 'no'}")
+    if row.attrs:
+        lines.append(f"  attrs: {json.dumps(row.attrs, sort_keys=True, ensure_ascii=False)}")
+    return "\n".join(lines)
+
+
+def render_slice(origin: str, direction: str, result: queries.SliceResult) -> str:
+    """The human form of `query slice` — the flagship answer (FR-15, FR-16, AC-28.2).
+
+    Truncation is stated, not implied: AC-28.2 requires the bound to be visible, so a
+    truncated slice names the budget that stopped it and the frontier it stopped at, which
+    is also the argument the user re-runs with.
+    """
+    relation = "calls" if direction == queries.FORWARD else "is called by"
+    lines = [
+        f"Slice ({direction}) from {origin}: {len(result.nodes)} nodes, {len(result.edges)} edges"
+    ]
+    for row in result.nodes:
+        lines.append(f"  {row.id}  [{row.kind}] {_location(row.file_path, row.start_line, None)}")
+    if result.edges:
+        lines.append(f"  — {relation} —")
+    for edge in result.edges:
+        flag = "  (ambiguous)" if edge.is_ambiguous else ""
+        lines.append(f"  {edge.src} → {edge.dst}{flag}")
+    if len(result.nodes) == 1 and not result.edges:
+        # AC-15.2: an origin with no edges in this direction is an empty result, said out
+        # loud so it cannot be mistaken for a failed query.
+        lines.append(f"  No {'outgoing' if direction == queries.FORWARD else 'incoming'} calls.")
+    if result.truncated:
+        lines.append(
+            f"  Truncated: the node budget was reached, so this slice is partial. "
+            f"{len(result.frontier)} nodes are on the frontier; "
+            f"re-run with a larger --max-nodes to expand."
+        )
+        for identifier in result.frontier:
+            lines.append(f"    frontier: {identifier}")
+    return "\n".join(lines)
+
+
 def _handle_query_entry_points(args: argparse.Namespace) -> int:
-    raise NotImplementedError("query entry-points is not implemented yet (specs/tasks.md task 3.5)")
+    def produce(index: Index) -> tuple[dict[str, Any], str]:
+        entries = queries.entry_points(index)
+        return queries.entry_points_json(entries), render_entry_points(entries)
+
+    return _answer(args, produce)
 
 
 def _handle_query_slice(args: argparse.Namespace) -> int:
-    raise NotImplementedError("query slice is not implemented yet (specs/tasks.md task 3.5)")
+    def produce(index: Index) -> tuple[dict[str, Any], str]:
+        # §8-O2: the bound has one definition site, in `queries`. `--max-nodes` overrides
+        # it; omitting the flag resolves there rather than to a second copy of the number.
+        max_nodes = queries.SLICE_MAX_NODES if args.max_nodes is None else args.max_nodes
+        result = queries.slice(index, args.from_node, args.direction, max_nodes)
+        return queries.slice_json(result), render_slice(args.from_node, args.direction, result)
+
+    return _answer(args, produce)
 
 
 def _handle_query_node(args: argparse.Namespace) -> int:
-    raise NotImplementedError("query node is not implemented yet (specs/tasks.md task 3.5)")
+    def produce(index: Index) -> tuple[dict[str, Any], str]:
+        row = queries.node(index, args.node_id)
+        return queries.node_json(row), render_node(row)
+
+    return _answer(args, produce)
 
 
 def _handle_query_dead_code(args: argparse.Namespace) -> int:
-    raise NotImplementedError("query dead-code is not implemented yet (specs/tasks.md task 3.5)")
+    def produce(index: Index) -> tuple[dict[str, Any], str]:
+        # D20: recomputed from the index, never read back from `deadcode.json` — so the
+        # answer is correct against an index whose report directory is absent. The
+        # rendering is `reports`' own, which is what guarantees AC-19.2's caveat appears
+        # here in the same words the run printed.
+        document = queries.dead_code_json(queries.dead_code(index))
+        return document, reports.render_deadcode(document)
+
+    return _answer(args, produce)
 
 
 def _handle_view(args: argparse.Namespace) -> int:
