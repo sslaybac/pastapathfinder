@@ -146,8 +146,12 @@ Which files a run re-processed and why (FR-35).
   (cached results were unusable and the file was re-analyzed from scratch).
 - `removed` lists files present in the previous run and absent now.
 
-Incremental re-analysis is not built yet: every run currently reports `mode: full` with
-empty lists.
+`analyze` is incremental automatically when a compatible index already exists; `--full`
+forces a full rebuild. The first analysis of a codebase — and any `--full` run — reports
+`mode: full`. A run in which no file and no packaging-metadata file changed reports
+`mode: skipped_no_changes` and re-processes nothing. A run that had to discard an unusable
+cache and rebuild from scratch reports `mode: fallback` with every file attributed
+`cache_fallback`.
 
 ## `change_warning.json`
 
@@ -170,7 +174,8 @@ made during a run goes unnoticed but cannot close it. An empty warning is not a 
 freshness. `check_failures` lists files that could not be re-read, each with its error —
 they are never counted as unchanged.
 
-The post-run check is not built yet: every run currently writes empty lists.
+The check runs on every analysis. A run during which nothing changed writes empty lists and
+prints no warning.
 
 ## `diagnostics.json`
 
@@ -218,5 +223,6 @@ Code unreachable from any detected entry point (FR-19).
   is the expected outcome for a library, whose entry points are its public API — in that
   case the list says nothing about dead code and must not be read as if it did.
 
-Reachability analysis is not built yet: every run currently writes an empty `unreachable`
-list.
+Reachability is computed on every analysis: functions reachable from a detected entry point
+are marked in the index, and `unreachable` lists the functions that are not, grouped by
+file. Per the caveat above, that is a conservative approximation, not proof of unused code.
