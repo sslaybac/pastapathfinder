@@ -4,4 +4,4 @@ Two programs sharing one artifact (design.md §1): the batch analysis pipeline
 (`pastapathfinder analyze`) and the local read-only viewer (`pastapathfinder view`).
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0"
