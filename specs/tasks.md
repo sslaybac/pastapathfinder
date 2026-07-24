@@ -305,7 +305,7 @@
     - `wsl.md` states the FR-31 condition explicitly: the FR-29/FR-30 bounds apply **only** when the target codebase and index reside on the Linux filesystem; codebases under `/mnt/c/...` are analyzable with all functional requirements applying and the performance bounds not asserted.
     - `configuration.md` documents `.pastapathfinder.toml` per §5.5 and the `--out` default derivation; `install.md` documents the single `pip install` command (AC-32.1) and the offline/no-admin posture.
 
-- [ ] **Task 5.4 — Platform and deployment verification (incl. the WSL2 pass)**
+- [x] **Task 5.4 — Platform and deployment verification (incl. the WSL2 pass)**
   - **Deliverable:** A recorded verification pass of the US-1..US-5 workflows on both supported platforms, plus the offline and unprivileged assertions.
   - **References:** design.md §8-O6, §5.1; requirements FR-31 (AC-31.1–31.4), FR-32, FR-33, FR-34.
   - **Dependencies:** 5.3.

@@ -8,6 +8,7 @@ Development tooling, not shipped product. Two things live here:
 | `test_compare.py`, `test_determinism.py` | the determinism gate over a fixture tree | 4.3 |
 | `benchmarks.py` | the pinned benchmark codebases: pins, checkout resolution, fetch-by-hash | 4.4 |
 | `test_benchmarks.py` | FR-29, FR-30, AC-29.3 and FR-44-at-scale on the pinned trees | 4.4 |
+| `PLATFORM-VERIFICATION.md` | the recorded FR-31/32/33/34 platform pass (US-1..US-5, both platforms, offline, unprivileged) | 5.4 |
 
 Governing documents: requirements §4.8 (reference machine, benchmark designations), FR-29,
 FR-30, FR-44; design.md §8-O5 (the pins), D1, D1a (engine-upgrade policy), §3.5 (the
