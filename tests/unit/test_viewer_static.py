@@ -9,12 +9,14 @@ and have not been edited in place, and that every resource the page pulls comes 
 machine. The behavioral acceptance criteria (AC-26/27/28, EC-15) are asserted in
 `test_viewer_frontend_js.py`, which executes `app.js`.
 
-**On FR-33's "no external URL" check.** Task 5.2 words it as a grep over the shipped assets
-that fails on any external URL. Taken to the letter that is unsatisfiable alongside D8's
-mandatory vendoring: the MIT license notices inside `cytoscape.min.js`, and the ECMAScript
-citations inside the dagre bundle's comments, are URL text in files that must ship
-byte-identical to what was fetched. So the check is split at the line where it means
-something:
+**On FR-33's "no external URL" check.** Task 5.2 originally worded it as a grep over the
+shipped assets that fails on any external URL. Taken to the letter that is unsatisfiable
+alongside D8's mandatory vendoring: the MIT license notices inside `cytoscape.min.js`, and
+the ECMAScript citations inside the dagre bundle's comments, are URL text in files that
+must ship byte-identical to what was fetched. The check is therefore split at the line
+where it means something — stakeholder-approved and recorded in the task's own verification
+bullet (*amended 2026-07-24*), so what follows is the specified check and not this file's
+improvisation:
 
 * **authored assets** (`index.html`, `app.js`, `style.css`) — no external URL at all, of any
   kind, anywhere in the file. That is the strict grep, and it is the one that could
