@@ -175,8 +175,9 @@ def test_the_owed_doc_set_is_present():
 
 def test_install_documents_the_single_command_and_offline_posture():
     text = _doc("install.md").lower()
-    # AC-32.1: a single pip install command.
-    assert "pip install pastapathfinder" in text
+    # AC-32.1: a single pip install command. The tool is not on PyPI, so the documented
+    # command installs from a checkout of the source tree.
+    assert "pip install ." in text
     # FR-33/FR-34: offline and no elevated privileges.
     assert "network" in text
     assert "privilege" in text or "admin" in text

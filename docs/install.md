@@ -15,8 +15,11 @@ no post-install setup steps (FR-32, FR-33, FR-34).
 
 ## The install command
 
+pastapathfinder is not published to PyPI. You install it from a checkout of the source
+tree — a single `pip install` command from the repository root:
+
 ```
-pip install pastapathfinder
+pip install .
 ```
 
 That is the whole installation (AC-32.1). It pulls in the three runtime dependencies —
@@ -27,11 +30,10 @@ That is the whole installation (AC-32.1). It pulls in the three runtime dependen
 pastapathfinder --help
 ```
 
-Installing from a local checkout of the source tree is the same command with a path:
+For development, install editable so source edits take effect without reinstalling:
 
 ```
-pip install .                 # from the repository root
-pip install -e .              # editable, for development
+pip install -e .
 ```
 
 Use a virtual environment if you do not want the tool and its dependencies in your global
@@ -39,7 +41,7 @@ site-packages:
 
 ```
 python -m venv .venv && . .venv/bin/activate
-pip install pastapathfinder
+pip install .                 # from the repository root
 ```
 
 ## Offline and unprivileged by construction
