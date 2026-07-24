@@ -16,9 +16,17 @@ field means. The tool applies this rule to itself: its own renderings go through
 refusal path, so a report from a future version produces an explicit error naming the
 found and supported versions, never a partial reading.
 
-## Volatile fields
+## Volatile fields — the complete register
 
-Two runs over an unchanged codebase produce identical reports except for one block:
+Analysis is deterministic: two runs over the same codebase, with the same configuration
+and the same tool version, produce the same index and the same reports (FR-44). Exactly
+two things are allowed to differ, and this is the whole list.
+
+| Artifact | Field | What it is |
+|---|---|---|
+| Every report | the `run` block | `run_id`, `started_at`, `finished_at`, `duration_seconds` |
+| `index.sqlite` | `meta.created_at` | when the index was written |
+| `index.sqlite` | `meta.run_id` | the run that wrote it |
 
 ```json
 "run": {
@@ -29,13 +37,31 @@ Two runs over an unchanged codebase produce identical reports except for one blo
 }
 ```
 
-Every report carries it, and nothing else in a report is permitted to vary between two
-runs over identical input (FR-44). The index has its own volatile pair, `meta.created_at`
-and `meta.run_id`. The complete register, and the comparison tool that enforces it,
-arrive with the determinism gate.
+Nothing else may vary. Every other `meta` key — `schema_version`, `tool_version`,
+`engine`, `engine_version`, `root_path`, `metadata_hash` — is compared, as is every node,
+edge and file row, and every field of every report outside its `run` block. Lists inside
+reports are ordered deterministically: paths and diagnostics sort, they do not appear in
+whatever order the filesystem or the engine produced them. Diffing two runs is therefore a
+supported way to check that a change to your codebase — or to this tool — did what you
+expected.
 
-Lists inside reports are ordered deterministically — paths and diagnostics sort, they do
-not appear in whatever order the filesystem or the engine produced them.
+### One documented exception: engine variance
+
+The analysis engine exhibits rare internal variance at very large scale. Measured: **3
+call edges out of 88,228** (0.003 %) differed between two runs of a 664,000-line codebase;
+at ~131,000 lines the difference was zero. The variance appears only as a `calls` edge
+being present in one run and absent in the other, together with any external node that had
+no other reference.
+
+This is documented rather than hidden: a difference of that shape, affecting at most
+**0.01 % of call edges**, is a known engine characteristic. Anything else — a missing
+function, a changed span, a different `contains` edge, any report difference — is a defect
+in this tool, not variance.
+
+The repository's comparison utility (`tests/regression/compare.py`, a development tool and
+not part of the installed command) implements exactly that classification: it strips the
+fields in the register above, then reports *equal*, *in variance class* (as a warning — it
+is never passed over silently), or a *defect*.
 
 ## `coverage.json`
 

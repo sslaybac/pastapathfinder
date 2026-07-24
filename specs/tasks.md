@@ -245,7 +245,7 @@
     - AC-38.3 (failure): a file deleted before completion is listed as `removed`; a file unreadable during the check is reported as a per-file `check_failure`, never treated as unchanged.
     - The `note` field states the best-effort, no-freshness-guarantee wording; a test asserts it is never rendered as a guarantee.
 
-- [ ] **Task 4.3 — `tests/regression/compare.py` and the determinism gate**
+- [x] **Task 4.3 — `tests/regression/compare.py` and the determinism gate**
   - **Deliverable:** The FR-44 comparator (a dev utility, **not** a shipped CLI command) plus the double-run determinism tests, and the volatile-field register published in `docs/report-formats.md`.
   - **References:** design.md §3.10 (comparator), §5.4, D12; requirements FR-44.
   - **Dependencies:** 2.5, 4.1.
