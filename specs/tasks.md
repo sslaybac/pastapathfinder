@@ -256,7 +256,7 @@
     - Determinism must not depend on the launcher: the tests run **without** `PYTHONHASHSEED` pinning (mypy measured seed-independent, `FINDINGS-mypy.md` Q4), and a test asserts equality under both the default seed and `PYTHONHASHSEED=0`.
     - Unit tests for the comparator itself: an injected single-edge difference at 0.001 % is reported as in-variance-class (warning, non-failing); an injected *node* difference, or a call-edge difference above threshold, fails.
 
-- [ ] **Task 4.4 — Benchmark regression suite and the D1a revalidation procedure**  ⚠ *highest-risk*
+- [x] **Task 4.4 — Benchmark regression suite and the D1a revalidation procedure**  ⚠ *highest-risk*
   - **Deliverable:** `tests/regression/` — a README copying the §"Benchmark pins" hashes **verbatim**, fetch-by-hash scripts, and the three long-running assertions; plus the D1a engine-upgrade revalidation procedure written down as a runnable sequence.
   - **References:** design.md §8-O5, D1, D1a, §3.5 (enumerated mypy internals); requirements FR-29 (AC-29.1, AC-29.3), FR-30 (AC-30.1), FR-44, §4.8 (reference machine and benchmark designations).
   - **Dependencies:** 4.1, 4.3.

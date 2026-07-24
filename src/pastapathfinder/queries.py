@@ -494,11 +494,20 @@ _KIND_SET = ",".join(f"'{kind}'" for kind in REACHABLE_KINDS)
 
 #: The BFS half: every node reachable from any entry point over `calls` edges. Entry nodes
 #: are seeds, not results — they keep `reachable` NULL, per §4.2's column comment.
+#:
+#: **The `+` on `e.kind` is load-bearing — do not remove it.** It marks the term
+#: non-indexable, which is the only way to keep SQLite from planning the recursive step
+#: through `ix_edges_dst (kind=?)`: that index seeks on `kind` alone here, so every
+#: iteration rescans *every* `calls` edge in the index instead of seeking the current
+#: node's own edges through the `edges` primary key (`src, dst, kind`). The cost is the
+#: product, and it only shows up at scale. Measured (task 4.4, pinned pandas benchmark,
+#: 135,407 call edges): **297 s** indexable, **0.04 s** with the `+`, marking the same
+#: 1,223 nodes — 71 % of that benchmark's whole run time was this one statement.
 _MARK_BFS = f"""
     WITH RECURSIVE reached(id) AS (
         SELECT id FROM nodes WHERE kind = 'entry_point'
         UNION
-        SELECT e.dst FROM edges e JOIN reached r ON e.src = r.id WHERE e.kind = 'calls'
+        SELECT e.dst FROM reached r JOIN edges e ON e.src = r.id AND +e.kind = 'calls'
     )
     UPDATE nodes SET reachable = 1
      WHERE kind IN ({_KIND_SET}) AND id IN (SELECT id FROM reached)
@@ -521,17 +530,27 @@ _DERIVE_CLASSES = """
 #: is whether something that `contains` this module also contains a reachable function.
 #: The container's `file` kind is asserted rather than assumed, so this stays a statement
 #: about the graph and not about how IDs happen to be spelled.
+#:
+#: Phrased as set membership rather than a correlated `EXISTS` on `nodes.id` for one
+#: reason, measured (task 4.4, on the pinned Django benchmark): correlated, SQLite drove
+#: the subquery from `sibling` and rescanned every `contains` edge once per module node —
+#: **15.8 s** of a 39.7 s incremental run, which is most of why FR-30's 30 s bound was
+#: missed. Computed once as a set, the same statement over the same index is **0.06 s**
+#: and marks exactly the same rows. The semantics below are D19's, unchanged.
 _DERIVE_MODULES = """
     UPDATE nodes SET reachable = 1
-     WHERE kind = 'module' AND reachable = 0 AND EXISTS (
-       SELECT 1
+     WHERE kind = 'module' AND reachable = 0 AND id IN (
+       SELECT parent.dst
          FROM edges parent
-         JOIN nodes container ON container.id = parent.src
-         JOIN edges sibling ON sibling.src = parent.src AND sibling.kind = 'contains'
-         JOIN nodes fn ON fn.id = sibling.dst
-        WHERE parent.kind = 'contains' AND parent.dst = nodes.id
-          AND container.kind = 'file'
-          AND fn.kind = 'function' AND fn.reachable = 1
+        WHERE parent.kind = 'contains'
+          AND parent.src IN (SELECT id FROM nodes WHERE kind = 'file')
+          AND parent.src IN (
+                SELECT sibling.src
+                  FROM edges sibling
+                  JOIN nodes fn ON fn.id = sibling.dst
+                 WHERE sibling.kind = 'contains'
+                   AND fn.kind = 'function' AND fn.reachable = 1
+              )
      )
 """
 

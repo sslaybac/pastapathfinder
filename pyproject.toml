@@ -50,3 +50,10 @@ select = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The task-4.4 benchmark suite analyzes Django and pandas end to end: minutes per test,
+# and it needs the pinned checkouts. It is excluded from the default run and selected
+# explicitly (`pytest -m slow`); see tests/regression/README.md.
+markers = [
+    "slow: long-running benchmark regression over the pinned codebases (tests/regression)",
+]
+addopts = "-m 'not slow'"
