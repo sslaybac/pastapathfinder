@@ -7,12 +7,20 @@ D20 (the server opens the index and no other file); requirements FR-25 (AC-25.1/
 FR-20 (AC-20.1/20.2), FR-26-28 (the data half; the views are task 5.2), FR-33, FR-39
 (AC-39.2/39.3), EC-13, EC-15.
 
-**Everything is answered from the index, and the index is the only file this process
-opens** (D20). There is no report directory in any code path here: `/api/dead-code`
-recomputes through `queries.dead_code()` rather than reading `deadcode.json`, which is what
-makes AC-25.1 a property a test can assert rather than a claim. The engine is unreachable
-by construction — this package may import neither `mypy.*` nor `pastapathfinder.adapters.*`
-(the standing task-1.1 import test), so the whole API is `index.py` plus `queries.py`.
+**Every answer comes from the index, and the index is the only file of the *analysis* this
+process opens** (D20). There is no report directory in any code path here:
+`/api/dead-code` recomputes through `queries.dead_code()` rather than reading
+`deadcode.json`, which is what makes AC-25.1 a property a test can assert rather than a
+claim. The engine is unreachable by construction — this package may import neither
+`mypy.*` nor `pastapathfinder.adapters.*` (the standing task-1.1 import test), so the whole
+API is `index.py` plus `queries.py`.
+
+The frontend's own files are the one other thing this process reads, and they are not an
+exception to D20: §3.11 ships `static/` as package data in the same paragraph that states
+the rule, so the rule is about where analysis *data* comes from. The distinction is
+enforced rather than asserted — `tests/unit/test_viewer_server.py` still holds every
+`/api/*` endpoint to the index alone, and `tests/unit/test_viewer_static.py` holds the
+asset routes to the package's own `static/` directory.
 
 **One serializer with the CLI.** Every payload below is produced by a `queries.*_json()`
 function, the same one `pastapathfinder query … --json` prints (design.md §5.1). Two
@@ -44,7 +52,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TextIO
 
-from flask import Flask, request
+from flask import Flask, request, send_from_directory
 
 from pastapathfinder import queries
 from pastapathfinder.index import INDEX_FILENAME, Index, IndexStoreError, open_index
@@ -60,6 +68,18 @@ from pastapathfinder.viewer import DEFAULT_PORT, HOST
 #: memory; it bounds the answer rather than rejecting the request.
 SEARCH_LIMIT = 50
 SEARCH_LIMIT_MAX = 500
+
+#: The no-build frontend, shipped as package data (design.md §3.11 `static`, D8; FR-33).
+#: Resolved from this module's own location so that the assets travel with the installed
+#: package — there is no CDN and no build directory to fall back to.
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+#: The URL prefix the page's own assets are served under. `index.html` addresses every
+#: asset absolutely (`/static/...`), so the page works identically at `/` and anywhere else.
+STATIC_URL_PATH = "/static"
+
+#: The page itself.
+INDEX_HTML = "index.html"
 
 # ---------------------------------------------------------------------------
 # HTTP status mapping
@@ -211,11 +231,13 @@ def create_app(index_path: Path | str) -> Flask:
     endpoint to answer with a structured error in that case, which it cannot do if
     construction fails first.
 
-    `static_folder=None` because this task ships no assets — the no-build frontend and its
-    routes are task 5.2's deliverable (design.md §3.11 `static/`, D8).
+    The frontend is served from the package's own `static/` directory (design.md §3.11,
+    D8): `/` is the page and `/static/...` its assets, all of them local files that ship
+    with the install. Nothing here reaches the network, and nothing here is generated —
+    there is no build step to run before the viewer works (FR-33).
     """
     path = Path(index_path)
-    app = Flask(__name__, static_folder=None)
+    app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path=STATIC_URL_PATH)
     # Deterministic bodies, for the same reason the store sorts at the write boundary
     # (D12): two identical requests must produce identical bytes.
     app.json.sort_keys = True
@@ -223,6 +245,16 @@ def create_app(index_path: Path | str) -> Flask:
     def answer(produce: Callable[[Index], dict[str, Any]]) -> tuple[dict[str, Any], int]:
         with _opened(path) as index:
             return produce(index), 200
+
+    @app.get("/")
+    def page():
+        """The viewer page (design.md §3.11 `static`).
+
+        Served whatever the state of the index: the page is what *renders* AC-25.2's
+        unreadable-index message, so refusing to serve it when the index is missing would
+        leave the user with nothing to read the error in.
+        """
+        return send_from_directory(STATIC_DIR, INDEX_HTML)
 
     @app.get("/api/meta")
     def meta() -> tuple[dict[str, Any], int]:
@@ -327,7 +359,7 @@ def serve(
     """
     path = index_file(out_dir)
     stream = sys.stdout if stdout is None else stdout
-    print(f"pastapathfinder viewer: http://{host}:{port}/api/meta", file=stream)
+    print(f"pastapathfinder viewer: http://{host}:{port}/", file=stream)
     print(f"  index: {path}", file=stream)
     print("  press Ctrl-C to stop", file=stream)
     create_app(path).run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
@@ -338,8 +370,11 @@ __all__ = [
     "ERROR_BAD_REQUEST",
     "ERROR_SERVER",
     "HOST",
+    "INDEX_HTML",
     "SEARCH_LIMIT",
     "SEARCH_LIMIT_MAX",
+    "STATIC_DIR",
+    "STATIC_URL_PATH",
     "STATUS_FOR_ERROR",
     "BadRequest",
     "create_app",

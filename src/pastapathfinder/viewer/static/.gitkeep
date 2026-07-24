@@ -1,4 +1,0 @@
-index.html, app.js, style.css and vendor/cytoscape.min.js are shipped as package
-data by specs/tasks.md task 5.2 (design.md §3.11, D8). This placeholder keeps the
-directory in the tree; no asset file is created empty, so nothing here can be
-mistaken for a vendored library.

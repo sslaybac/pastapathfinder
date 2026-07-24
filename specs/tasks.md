@@ -281,7 +281,7 @@
     - **D20 invariant:** a test asserts the running server opens **no file other than the index** — the report directory may be absent entirely and every endpoint still answers.
     - FR-33: a test asserts the server binds only 127.0.0.1 and that no request leaves the machine (no outbound sockets during a session).
 
-- [ ] **Task 5.2 — `viewer/static/`: the no-build frontend**  ⚠ *highest-risk*
+- [x] **Task 5.2 — `viewer/static/`: the no-build frontend**  ⚠ *highest-risk*
   - **Deliverable:** `index.html`, `app.js`, `style.css`, and vendored `cytoscape.min.js` + its dagre layout plugin shipped as package data — entry-point list, trace view with forward/backward toggle, node panel, truncation banner with frontier-expand, and full-screen error states.
   - **References:** design.md §3.11 (`static`), D8, §8-O2, §8-O3, R2; requirements FR-25–28, FR-33, EC-15, EC-6.
   - **Dependencies:** 5.1.

@@ -33,6 +33,18 @@ version = { attr = "pastapathfinder.__version__" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# design.md §3.11 and D8: the viewer's frontend ships with the package. Vendoring the
+# graph library is mandatory (a CDN reference at runtime would violate FR-33), and there
+# is no build step, so these files are shipped exactly as they are committed.
+[tool.setuptools.package-data]
+pastapathfinder = [
+    "viewer/static/*.html",
+    "viewer/static/*.css",
+    "viewer/static/*.js",
+    "viewer/static/vendor/*.js",
+    "viewer/static/vendor/*.md",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

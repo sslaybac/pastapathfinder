@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pastapathfinder</title>
+    <!--
+      Every asset below is local (FR-33, design.md D8): no CDN, no npm, no build step.
+      The two vendored libraries load first because app.js registers the dagre layout
+      against the cytoscape global at evaluation time.
+    -->
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <!--
+      AC-25.2 / EC-13: the index missing, unreadable, or schema-incompatible is not a
+      view state — it is the absence of everything this page shows, so it covers the page
+      rather than appearing beside a UI that has nothing behind it.
+    -->
+    <div id="fatal" class="overlay" hidden>
+      <div class="overlay-card">
+        <h1 id="fatal-title">The index cannot be read</h1>
+        <p id="fatal-message"></p>
+        <p id="fatal-hint" class="hint"></p>
+        <button id="fatal-retry" type="button">Try again</button>
+      </div>
+    </div>
+
+    <header id="masthead">
+      <h1>pastapathfinder</h1>
+      <span id="meta-root" class="meta"></span>
+      <span id="meta-counts" class="meta"></span>
+    </header>
+
+    <main id="layout">
+      <aside id="sidebar">
+        <nav id="tabs">
+          <button id="tab-entry-points" type="button" class="tab tab-active">Entry points</button>
+          <button id="tab-dead-code" type="button" class="tab">Dead code</button>
+        </nav>
+
+        <section id="entry-points-pane">
+          <!-- AC-26.1: every entry node, selectable. -->
+          <ul id="entry-point-list" class="listing"></ul>
+          <!-- AC-26.2: stated explicitly when there are none, never an empty box. -->
+          <p id="entry-points-empty" class="empty-state" hidden></p>
+
+          <!-- FR-17 / AC-26.2: any node in the index can be a slice origin. -->
+          <form id="search-form" autocomplete="off">
+            <label for="search-input">Slice from any node</label>
+            <input
+              id="search-input"
+              type="search"
+              placeholder="function, method, or module name"
+            />
+            <button id="search-submit" type="submit">Search</button>
+          </form>
+          <p id="search-status" class="status" hidden></p>
+          <ul id="search-results" class="listing"></ul>
+        </section>
+
+        <section id="dead-code-pane" hidden>
+          <!-- AC-19.2: no rendering of these findings without the caveat. -->
+          <p id="dead-code-caveat" class="caveat"></p>
+          <p id="dead-code-warning" class="warning" hidden></p>
+          <p id="dead-code-status" class="status" hidden></p>
+          <ul id="dead-code-list" class="listing"></ul>
+        </section>
+      </aside>
+
+      <section id="trace">
+        <div id="trace-toolbar">
+          <span id="trace-origin" class="origin"></span>
+          <div id="direction-toggle">
+            <button id="direction-forward" type="button" class="toggle">Forward</button>
+            <button id="direction-backward" type="button" class="toggle">Backward</button>
+          </div>
+          <button id="back-to-entry-points" type="button">Back to entry points</button>
+        </div>
+
+        <!-- AC-27.2: a failed query says what failed, in view. Never a blank canvas. -->
+        <p id="trace-error" class="error" hidden></p>
+
+        <!-- AC-28.2: the bound is visible, and it is expandable. -->
+        <div id="truncation-banner" class="banner" hidden>
+          <span id="truncation-message"></span>
+          <button id="frontier-expand" type="button">Expand</button>
+          <ul id="frontier-list" class="listing frontier"></ul>
+        </div>
+
+        <p id="trace-empty" class="empty-state" hidden></p>
+        <p id="trace-placeholder" class="empty-state">
+          Select an entry point to open a trace.
+        </p>
+        <!-- AC-28.1: what is rendered here is always one slice, never the whole graph. -->
+        <div id="graph"></div>
+      </section>
+
+      <aside id="node-panel">
+        <p id="node-panel-empty" class="empty-state">Select a node in the trace.</p>
+        <div id="node-panel-body" hidden>
+          <h2 id="node-panel-name"></h2>
+          <p id="node-panel-kind" class="field"></p>
+          <!-- AC-27.3: file_path:start-end, or the external statement in its place. -->
+          <p id="node-panel-location" class="field"></p>
+          <p id="node-panel-reachable" class="field"></p>
+          <p id="node-panel-id" class="field mono"></p>
+          <div id="node-panel-actions">
+            <button id="node-panel-slice-forward" type="button">Slice forward</button>
+            <button id="node-panel-slice-backward" type="button">Slice backward</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/static/vendor/cytoscape.min.js"></script>
+    <script src="/static/vendor/cytoscape-dagre.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
