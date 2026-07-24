@@ -269,7 +269,7 @@
 
 ### Milestone 5 — Viewer, documentation, platform verification
 
-- [ ] **Task 5.1 — `viewer/server.py`: the read-only JSON API**
+- [x] **Task 5.1 — `viewer/server.py`: the read-only JSON API**
   - **Deliverable:** The Flask app of design.md §3.11 and §5.2 — every endpoint listed there, structured error bodies, `127.0.0.1:<port>` bind (default 8517), debug off, index opened read-only through `index.py`.
   - **References:** design.md §3.11 (`server`), §5.2, D7, D7a, D20; requirements FR-25, FR-20, FR-26–28 (data side), FR-33, FR-39, EC-13, EC-15.
   - **Dependencies:** 3.5.

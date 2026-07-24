@@ -70,13 +70,16 @@ def test_usage_errors_raise_systemexit_from_main():
     assert excinfo.value.code == cli.EXIT_FAILURE
 
 
-def test_handler_exception_maps_to_failure_with_one_line():
+def test_handler_exception_maps_to_failure_with_one_line(tmp_path):
     """AC-43.3: an exception escaping a handler exits 2 with a one-line message.
 
-    `view` is the live example: its handler still raises until task 5.1 fills it in, which
-    is exactly the escaped exception the D10 trap must map.
+    A query against a missing index is the live example — AC-20.2's `IndexMissingError`,
+    raised inside the handler, which is exactly the escaped exception the D10 trap must
+    map, and raised before anything else has written to stderr. (Until task 5.1 landed,
+    `view`'s unimplemented handler played this part; it now starts a server, so it is no
+    longer available as a raiser.)
     """
-    result = run_cli("view")
+    result = run_cli("query", "entry-points", "--out", str(tmp_path))
     assert result.returncode == cli.EXIT_FAILURE
     lines = result.stderr.strip().splitlines()
     assert len(lines) == 1
@@ -84,12 +87,12 @@ def test_handler_exception_maps_to_failure_with_one_line():
     assert TRACEBACK_MARKER not in result.stderr
 
 
-def test_handler_exception_prints_traceback_only_under_debug():
-    result = run_cli("view", "--debug")
+def test_handler_exception_prints_traceback_only_under_debug(tmp_path):
+    result = run_cli("query", "entry-points", "--out", str(tmp_path), "--debug")
     assert result.returncode == cli.EXIT_FAILURE
     assert result.stderr.startswith("pastapathfinder: error: ")
     assert TRACEBACK_MARKER in result.stderr
-    assert "NotImplementedError" in result.stderr
+    assert "IndexMissingError" in result.stderr
 
 
 def test_arbitrary_exception_is_trapped(monkeypatch, capsys):

@@ -336,6 +336,50 @@ def node(index: Index, node_id: str) -> NodeRow:
 
 
 # ---------------------------------------------------------------------------
+# Node search (the §5.2 `/api/nodes?search=` read; AC-26.2)
+# ---------------------------------------------------------------------------
+
+#: LIKE's own wildcards, escaped so a search for `a_b` matches `a_b` and not `axb`.
+_LIKE_ESCAPE = "\\"
+
+_SEARCH = f"""
+    SELECT {_NODE_COLUMNS} FROM nodes
+     WHERE id LIKE ? ESCAPE '{_LIKE_ESCAPE}' OR name LIKE ? ESCAPE '{_LIKE_ESCAPE}'
+     ORDER BY id
+     LIMIT ?
+"""
+
+
+def search_nodes(index: Index, term: str, limit: int) -> list[NodeRow]:
+    """Nodes whose id or name contains `term`, by id, at most `limit` of them.
+
+    The read behind `/api/nodes?search=` (§5.2), which is AC-26.2's alternative: with zero
+    entry points — EC-9's normal outcome for a library — the viewer offers FR-17's
+    slice-from-any-node, and this is how the user names the node. It lives here with the
+    other index reads because it speaks the same row vocabulary, and it has no CLI
+    counterpart to drift from.
+
+    Matching is substring, case-insensitive over ASCII (SQLite's `LIKE`), and the result is
+    ordered by id: a truncated answer is then a stable prefix rather than whatever the
+    query plan produced first.
+
+    `limit` carries no default here on purpose: the number §5.2 publishes (50) is the
+    *API's*, so it has one definition site, in `viewer.server` — the same discipline
+    §8-O2's slice bound gets, pointed the other way because this read has no CLI surface.
+    """
+    if limit < 1:
+        raise ValueError(f"limit must be at least 1, not {limit!r}")
+    escaped = (
+        term.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", f"{_LIKE_ESCAPE}%")
+        .replace("_", f"{_LIKE_ESCAPE}_")
+    )
+    pattern = f"%{escaped}%"
+    rows = index.connection.execute(_SEARCH, (pattern, pattern, limit))
+    return [_node_row(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
 # Entry points (FR-8; the §5.2 listing)
 # ---------------------------------------------------------------------------
 
@@ -663,6 +707,11 @@ def node_json(row: NodeRow) -> dict[str, Any]:
     }
 
 
+def nodes_json(rows: Sequence[NodeRow]) -> dict[str, Any]:
+    """`/api/nodes?search=`'s shape (§5.2): a list of the same node documents."""
+    return {"nodes": [node_json(row) for row in rows]}
+
+
 def entry_points_json(entries: Sequence[EntryPoint]) -> dict[str, Any]:
     """`/api/entry-points`'s shape (§5.2). Order is `entry_points()`'s: by id."""
     return {
@@ -750,7 +799,9 @@ __all__ = [
     "error_json",
     "node",
     "node_json",
+    "nodes_json",
     "reachability",
+    "search_nodes",
     "slice",
     "slice_json",
 ]

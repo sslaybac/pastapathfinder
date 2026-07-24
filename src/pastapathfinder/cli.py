@@ -28,7 +28,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from pastapathfinder import __version__, queries, reports, runner
+from pastapathfinder import __version__, queries, reports, runner, viewer
 from pastapathfinder.config import load_config
 from pastapathfinder.index import INDEX_FILENAME, Index, IndexStoreError, open_index
 from pastapathfinder.schema import NodeRow
@@ -41,8 +41,10 @@ EXIT_SUCCESS = 0
 EXIT_PARTIAL = 1
 EXIT_FAILURE = 2
 
-# design.md §3.11: the viewer binds 127.0.0.1 on this port unless overridden.
-DEFAULT_VIEWER_PORT = 8517
+# design.md §3.11: the viewer binds 127.0.0.1 on this port unless overridden. Read from
+# the viewer package, which is its definition site — importing `viewer.server` here would
+# pull Flask into every `analyze` and `query` invocation for one integer.
+DEFAULT_VIEWER_PORT = viewer.DEFAULT_PORT
 
 
 def _add_debug(parser: argparse.ArgumentParser) -> None:
@@ -401,7 +403,19 @@ def _handle_query_dead_code(args: argparse.Namespace) -> int:
 
 
 def _handle_view(args: argparse.Namespace) -> int:
-    raise NotImplementedError("view is not implemented yet (specs/tasks.md task 5.1)")
+    """Serve the local viewer until interrupted (design.md §3.1's wiring; FR-25).
+
+    The index is located exactly as a `query` locates it — the viewer answers the same
+    questions from the same file — and `viewer.server` is imported here rather than at
+    module scope so that a `query` invocation never pays for Flask.
+
+    `serve()` returns when the server stops (Werkzeug absorbs the interrupt), and a
+    stopped server is a completed command: exit 0.
+    """
+    from pastapathfinder.viewer import server
+
+    server.serve(query_out_dir(args.out), args.port)
+    return EXIT_SUCCESS
 
 
 def _one_line(exc: BaseException) -> str:
